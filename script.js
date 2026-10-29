@@ -38,7 +38,7 @@ $("#clearRankingBtn").addEventListener("click", () => {
 document.addEventListener("keydown", event => {
   if (event.code === "Space" && state.running) {
     event.preventDefault();
-    shootAt(null);
+    shootAtAim();
   }
 });
 $("#arena").addEventListener("pointermove", event => {
