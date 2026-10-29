@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#090d1b">
+  <title>WEB HERO | Mundo SENAI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div><div class="senai-grid-glow"></div>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Web Hero início"><span class="brand-mark">✦</span><span>WEB<span class="accent">HERO</span><small>MUNDO SENAI · DESENVOLVIMENTO DE SISTEMAS</small></span></a>
+    <nav class="nav-tabs" aria-label="Menu principal">
+      <button class="tab active" data-view="gameView">JOGAR</button>
+      <button class="tab" data-view="rankingView">RANKING</button>
+      <button class="tab" data-view="howView">COMO JOGAR</button>
+    </nav>
+    <div class="live-pill"><span></span> ARCADE MODE</div>
+  </header>
+
+  <main>
+    <section id="gameView" class="view active-view">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="eyebrow-line"></span> MUNDO SENAI · EXPERIÊNCIA INTERATIVA</div>
+        <h1>SUA HISTÓRIA<br><span class="gradient-text">COMEÇA AQUI.</span></h1>
+        <p>Vista a máscara, ative seu disparador e proteja a cidade. Tecnologia, reflexos e muita teia em uma missão arcade.</p>
+        <div class="hero-tags"><span>⚡ TECNOLOGIA</span><span>🕸️ MISSÃO TEIA</span><span>🎮 ARCADE</span></div>
+      </div>
+
+      <section id="setupPanel" class="panel setup-panel">
+        <div class="section-heading"><div><span class="step-label">01 / PREPARE-SE</span><h2>Escolha seu herói</h2></div><span class="mini-icon">✦</span></div>
+        <label class="input-label" for="playerName">SEU CODINOME</label>
+        <input id="playerName" maxlength="16" placeholder="Ex.: AranhaAzul" autocomplete="off">
+        <div class="character-grid">
+          <button class="character-card selected" data-character="Peter Parker" data-color="red" type="button">
+            <span class="character-art peter"><img src="assets/spider-man-peter.png" alt="Spider-Man Peter Parker" loading="eager"></span><strong>SPIDER-MAN</strong><small>PETER PARKER</small><span class="select-mark">✓</span>
+          </button>
+          <button class="character-card" data-character="Miles Morales" data-color="black" type="button">
+            <span class="character-art miles"><img src="assets/miles-morales.png" alt="Miles Morales" loading="eager"></span><strong>MILES MORALES</strong><small>ARANHA DO BROOKLYN</small><span class="select-mark">✓</span>
+          </button>
+          <button class="character-card" data-character="Spider-Gwen" data-color="white" type="button">
+            <span class="character-art gwen"><img src="assets/spider-gwen.png" alt="Spider-Gwen" loading="eager"></span><strong>SPIDER-GWEN</strong><small>ARANHA FANTASMA</small><span class="select-mark">✓</span>
+          </button>
+        </div>
+        <div class="setup-footer"><span>3 FASES · 30 SEGUNDOS POR FASE</span><button id="startBtn" class="primary-btn">INICIAR MISSÃO <span>↗</span></button></div>
+      </section>
+
+      <section id="playPanel" class="panel play-panel hidden">
+        <div class="hud">
+          <div><span class="hud-label">HERÓI</span><strong id="hudHero">SPIDER-MAN</strong></div>
+          <div><span class="hud-label">FASE</span><strong id="levelValue">01 <small>/ 03</small></strong></div>
+          <div><span class="hud-label">PONTOS</span><strong id="scoreValue">0000</strong></div>
+          <div><span class="hud-label">TEMPO</span><strong id="timeValue">30s</strong></div>
+        </div>
+        <div id="arena" class="arena" aria-label="Área do jogo">
+          <div class="city-image-overlay"></div><div class="moon"></div><div class="sun-glow"></div>
+          <div class="city city-back"></div><div class="city city-front"></div>
+          <div class="web-decoration web-left"></div><div class="web-decoration web-right"></div>
+          <div class="arena-title"><span>MISSÃO ATIVA</span><strong id="missionText">CAPTURE OS INIMIGOS!</strong></div>
+          <div id="targetLayer"></div>
+          <svg id="webSvg" class="web-svg" aria-hidden="true" viewBox="0 0 1000 500" preserveAspectRatio="none"><g id="webEffect"></g><line id="webLine" x1="500" y1="440" x2="500" y2="250"></line></svg>
+          <div class="hero-avatar" id="heroAvatar"><img src="assets/hero-avatar.png" alt="Homem-Aranha pronto para disparar teia" draggable="false"></div>
+          <div class="crosshair" id="crosshair">+</div>
+          <div class="arena-message" id="arenaMessage">PREPARE-SE...</div>
+        </div>
+        <div class="game-controls">
+          <div class="connection-status"><span id="connectionDot"></span><div><strong id="connectionText">DISPARADOR NÃO CONECTADO</strong><small>Use o disparador USB ou pressione ESPAÇO para testar</small></div></div>
+          <div class="control-actions"><button id="connectBtn" class="secondary-btn">CONECTAR DISPARADOR</button><button id="shootBtn" class="primary-btn">DISPARAR TEIA <span>⌁</span></button></div>
+        </div>
+        <div class="game-note">Dica: mire clicando no alvo. Para testar sem hardware, use o mouse ou a barra de espaço.</div>
+      </section>
+    </section>
+
+    <section id="rankingView" class="view">
+      <div class="hero-copy compact"><div class="eyebrow"><span class="eyebrow-line"></span> HALL DOS HERÓIS</div><h1>PLACAR DE<br><span class="gradient-text">LENDAS.</span></h1><p>As melhores pontuações salvas neste computador.</p></div>
+      <section class="panel ranking-panel"><div class="section-heading"><div><span class="step-label">TOP JOGADORES</span><h2>Ranking local</h2></div><button id="clearRankingBtn" class="text-btn">LIMPAR PLACAR</button></div><div id="rankingList"></div><p class="local-warning">Este ranking fica salvo neste navegador e computador. Para compartilhar resultados entre computadores, será necessário um servidor ou banco de dados.</p></section>
+    </section>
+
+    <section id="howView" class="view">
+      <div class="hero-copy compact"><div class="eyebrow"><span class="eyebrow-line"></span> GUIA DO RECRUTA</div><h1>DOMINE A<br><span class="gradient-text">SUA TEIA.</span></h1><p>Leia as instruções antes de entrar na missão.</p></div>
+      <section class="panel how-panel">
+        <div class="instruction"><span class="instruction-number">01</span><div><h3>Escolha seu herói</h3><p>Digite um codinome e selecione uma das opções disponíveis.</p></div></div>
+        <div class="instruction"><span class="instruction-number">02</span><div><h3>Dispare a teia</h3><p>Conecte o disparador compatível ou use o mouse, o botão na tela ou a barra de espaço para testar.</p></div></div>
+        <div class="instruction"><span class="instruction-number">03</span><div><h3>Capture os bandidos</h3><p>Dispare a teia nos criminosos que aparecem pela cidade. Os inimigos especiais valem mais pontos.</p></div></div>
+        <div class="instruction"><span class="instruction-number">04</span><div><h3>Supere as três fases</h3><p>Você tem 30 segundos por fase. Os alvos ficam mais rápidos a cada nível.</p></div></div>
+        <div class="hardware-note"><strong>Sobre o disparador físico</strong><p>O site usa a API Web Serial do Chrome/Edge para receber o comando <code>SHOOT</code> pela USB. O microcontrolador precisa enviar <code>SHOOT\n</code> quando o gatilho for acionado. O firmware exato depende da placa e do circuito de vocês.</p></div>
+      </section>
+    </section>
+  </main>
+  <footer><span>WEB HERO <b>×</b> MUNDO SENAI</span><span>UM PROJETO DE DESENVOLVIMENTO DE SISTEMAS</span></footer>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="script.js"></script>
+</body>
+</html>
