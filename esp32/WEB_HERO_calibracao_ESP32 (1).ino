@@ -84,7 +84,7 @@ void loop() {
   yawDeg += ((float)gyroZ - gyroZOffset) / 131.0f * dt;
 
   float aimX = 500.0f + (yawDeg / YAW_RANGE_DEG) * 500.0f;
-  float aimY = 500.0f - ((pitchDeg - pitchCenterDeg) / PITCH_RANGE_DEG) * 500.0f;
+  float aimY = 500.0f + ((pitchDeg - pitchCenterDeg) / PITCH_RANGE_DEG) * 500.0f;
   aimX = constrain(aimX, 0.0f, 1000.0f);
   aimY = constrain(aimY, 0.0f, 1000.0f);
 
