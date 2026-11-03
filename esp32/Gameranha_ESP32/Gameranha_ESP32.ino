@@ -12,36 +12,42 @@
 #define SCL_PIN 22
 
 const int buzzerPin = 19;
-const float GYRO_SCALE = 131.0f;
-const float ACCEL_SCALE = 16384.0f;
-const float YAW_RANGE_DEG = 35.0f;
+const float GYRO_SCALE = 131.0f;       // MPU6050 em +/-250 graus/s
+const float ACCEL_SCALE = 16384.0f;   // MPU6050 em +/-2g
 const float PITCH_RANGE_DEG = 22.0f;
-const float FILTER_TAU = 0.50f;
+const float ROLL_RANGE_DEG = 35.0f;
+const float FILTER_TAU = 0.24f;        // filtro complementar
 const int CALIBRATION_SAMPLES = 700;
 const int CALIBRATION_ATTEMPTS = 3;
 const float MAX_GYRO_STD_RAW = 300.0f;
 const float MIN_GRAVITY_G = 0.85f;
 const float MAX_GRAVITY_G = 1.15f;
-const float REST_GYRO_DPS = 2.5f;
-const float REST_MIN_G = 0.95f;
-const float REST_MAX_G = 1.05f;
-const unsigned long REST_CONFIRM_MS = 700;
-const float BIAS_ADAPT_RATE = 0.0005f;
+const float ACCEL_TRUST_MIN_G = 0.90f;
+const float ACCEL_TRUST_MAX_G = 1.10f;
+const float GYRO_DEADBAND_DPS = 0.35f;
+const float REST_GYRO_DPS = 1.5f;
+const float REST_MIN_G = 0.98f;
+const float REST_MAX_G = 1.02f;
+const unsigned long REST_CONFIRM_MS = 800;
+const float BIAS_ADAPT_RATE = 0.00015f;
 const unsigned long SHOT_COOLDOWN = 700;
-const long SHAKE_LIMIT = 8000;
+const float SHOT_GYRO_THRESHOLD_DPS = 120.0f;
+const int SHOT_CONFIRM_SAMPLES = 2;
 const int MAX_READ_ERRORS = 3;
 
-// 0 = X | 1 = Y | 2 = Z. Sinal -1.0 inverte o eixo.
-const int PITCH_GYRO_AXIS = 1;
-const int YAW_GYRO_AXIS = 2;
-const float PITCH_SIGN = 1.0f;
-const float YAW_SIGN = 1.0f;
-const bool USE_ACCEL_PITCH = true;
+// Eixos do MPU6050 na orientação padrão da placa:
+// Pitch: rotação no eixo Y; Roll: rotação no eixo X.
+// Se um movimento ficar invertido, altere o respectivo sinal para -1.
+const float PITCH_GYRO_SIGN = 1.0f;
+const float ROLL_GYRO_SIGN = 1.0f;
+const float PITCH_ACCEL_SIGN = 1.0f;
+const float ROLL_ACCEL_SIGN = 1.0f;
 
 int16_t accelX=0, accelY=0, accelZ=0;
 int16_t gyroX=0, gyroY=0, gyroZ=0;
 float gyroOffset[3]={0,0,0};
-float pitchDeg=0, yawDeg=0, pitchCenterDeg=0;
+float pitchDeg=0.0f, rollDeg=0.0f;
+float pitchCenterDeg=0.0f, rollCenterDeg=0.0f;
 bool mpuPresent=false;
 bool sensorReady=false;
 bool calibrationError=false;
@@ -49,7 +55,7 @@ bool calibrationInProgress=false;
 unsigned long lastImuTime=0, lastAimSend=0, lastShotTime=0;
 unsigned long restStartedAt=0;
 bool restCandidate=false;
-long oldMotion=0;
+int shotConfirmCount=0;
 int consecutiveReadErrors=0;
 
 // ------------------------- BUZZER -------------------------
@@ -90,14 +96,13 @@ bool checkMpu(){
   Wire.beginTransmission(MPU_ADDR);Wire.write(0x75);
   if(Wire.endTransmission(false)!=0)return false;
   if(Wire.requestFrom((uint8_t)MPU_ADDR,(uint8_t)1)!=1)return false;
-  uint8_t identity=Wire.read();
-  return identity==0x68;
+  return Wire.read()==0x68;
 }
 bool configureMpu(){
   bool ok=true;
-  ok=writeMpuRegister(0x6B,0x00)&&ok; // wake up
+  ok=writeMpuRegister(0x6B,0x00)&&ok;
   delay(50);
-  ok=writeMpuRegister(0x1A,0x04)&&ok; // DLPF
+  ok=writeMpuRegister(0x1A,0x04)&&ok; // filtro digital
   ok=writeMpuRegister(0x1B,0x00)&&ok; // gyro +/-250 dps
   ok=writeMpuRegister(0x1C,0x00)&&ok; // accel +/-2g
   delay(20);
@@ -110,13 +115,13 @@ bool readImu(){
   accelX=(int16_t)((Wire.read()<<8)|Wire.read());
   accelY=(int16_t)((Wire.read()<<8)|Wire.read());
   accelZ=(int16_t)((Wire.read()<<8)|Wire.read());
-  Wire.read();Wire.read(); // temperatura
+  Wire.read();Wire.read();
   gyroX=(int16_t)((Wire.read()<<8)|Wire.read());
   gyroY=(int16_t)((Wire.read()<<8)|Wire.read());
   gyroZ=(int16_t)((Wire.read()<<8)|Wire.read());
   return true;
 }
-void invalidateCalibration(){sensorReady=false;calibrationError=false;calibrationInProgress=false;restCandidate=false;}
+void invalidateCalibration(){sensorReady=false;calibrationError=false;calibrationInProgress=false;restCandidate=false;shotConfirmCount=0;}
 void recoverI2c(){
   invalidateCalibration();mpuPresent=false;Serial.println("I2C_RECOVERY");
   Wire.end();delay(30);Wire.begin(SDA_PIN,SCL_PIN);Wire.setClock(100000);Wire.setTimeOut(50);delay(50);
@@ -125,10 +130,17 @@ void recoverI2c(){
   else{calibrationError=true;Serial.println("SENSOR_ERROR");}
 }
 
-// ------------------------- CÁLCULOS -------------------------
-float gravityMagnitudeG(){return sqrtf((float)accelX*accelX+(float)accelY*accelY+(float)accelZ*accelZ)/ACCEL_SCALE;}
-float accelPitch(){return atan2f(-(float)accelX,sqrtf((float)accelY*accelY+(float)accelZ*accelZ))*180.0f/PI;}
-long motionMagnitude(){return labs((long)accelX)+labs((long)accelY)+labs((long)accelZ);}
+// ------------------------- CÁLCULOS DE ORIENTAÇÃO -------------------------
+float gravityMagnitudeG(){
+  return sqrtf((float)accelX*accelX+(float)accelY*accelY+(float)accelZ*accelZ)/ACCEL_SCALE;
+}
+float accelPitch(){
+  return PITCH_ACCEL_SIGN*atan2f(-(float)accelX,sqrtf((float)accelY*accelY+(float)accelZ*accelZ))*180.0f/PI;
+}
+float accelRoll(){
+  return ROLL_ACCEL_SIGN*atan2f((float)accelY,(float)accelZ)*180.0f/PI;
+}
+float applyDeadband(float value,float deadband){return fabsf(value)<deadband?0.0f:value;}
 
 // ------------------------- CALIBRAÇÃO -------------------------
 bool calibrateGyro(){
@@ -172,8 +184,9 @@ bool calibrateGyro(){
     if(!readImu()){
       calibrationInProgress=false;calibrationError=true;Serial.println("CALIBRATION_ERROR");return false;
     }
-    pitchDeg=USE_ACCEL_PITCH?accelPitch():0.0f;pitchCenterDeg=pitchDeg;yawDeg=0;
-    oldMotion=motionMagnitude();lastImuTime=micros();lastAimSend=0;restCandidate=false;consecutiveReadErrors=0;
+    pitchDeg=accelPitch();rollDeg=accelRoll();
+    pitchCenterDeg=pitchDeg;rollCenterDeg=rollDeg;
+    lastImuTime=micros();lastAimSend=0;restCandidate=false;shotConfirmCount=0;consecutiveReadErrors=0;
     calibrationInProgress=false;calibrationError=false;sensorReady=true;
     Serial.println("CALIBRATION_OK");Serial.println("CENTER_OK");Serial.println("READY");startWebSound();return true;
   }
@@ -183,17 +196,18 @@ bool calibrateGyro(){
 // ------------------------- CENTRALIZAÇÃO -------------------------
 void centerAim(){
   if(!sensorReady||!readImu()){Serial.println("CENTER_ERROR");return;}
-  pitchDeg=USE_ACCEL_PITCH?accelPitch():pitchDeg;pitchCenterDeg=pitchDeg;yawDeg=0;Serial.println("CENTER_OK");
+  pitchDeg=accelPitch();rollDeg=accelRoll();
+  pitchCenterDeg=pitchDeg;rollCenterDeg=rollDeg;
+  Serial.println("CENTER_OK");
 }
 
 // ------------------------- SERIAL -------------------------
 void printStatus(){
-  // Ordem importante: sensor ausente não deve ser reportado como erro de calibração.
-  if(!mpuPresent){Serial.println("SENSOR_ERROR");}
-  else if(calibrationInProgress){Serial.println("CALIBRATING");}
-  else if(sensorReady){Serial.println("READY");}
-  else if(calibrationError){Serial.println("CALIBRATION_ERROR");}
-  else{Serial.println("CALIBRATION_REQUIRED");}
+  if(!mpuPresent)Serial.println("SENSOR_ERROR");
+  else if(calibrationInProgress)Serial.println("CALIBRATING");
+  else if(sensorReady)Serial.println("READY");
+  else if(calibrationError)Serial.println("CALIBRATION_ERROR");
+  else Serial.println("CALIBRATION_REQUIRED");
 }
 void handleSerialCommands(){
   static String command="";
@@ -208,7 +222,7 @@ void handleSerialCommands(){
       }
       else if(command=="CENTER")centerAim();
       command="";
-    }else if(command.length()<24){command+=c;}
+    }else if(command.length()<24)command+=c;
   }
 }
 
@@ -220,7 +234,6 @@ void setup(){
   mpuPresent=configureMpu();
   if(mpuPresent){Serial.println("SENSOR_OK");Serial.println("CALIBRATION_REQUIRED");}
   else{calibrationError=false;Serial.println("SENSOR_ERROR");}
-  // A calibração é iniciada pelo navegador, somente após o usuário posicionar o pulso.
 }
 
 // ------------------------- LOOP -------------------------
@@ -233,22 +246,33 @@ void loop(){
     delay(5);return;
   }
   consecutiveReadErrors=0;
-  unsigned long nowUs=micros();float dt=(nowUs-lastImuTime)/1000000.0f;lastImuTime=nowUs;
-  if(dt<=0||dt>0.05f)dt=0.005f;
-  float gx=((float)gyroX-gyroOffset[0])/GYRO_SCALE;
-  float gy=((float)gyroY-gyroOffset[1])/GYRO_SCALE;
-  float gz=((float)gyroZ-gyroOffset[2])/GYRO_SCALE;
-  float gyroAxes[3]={gx,gy,gz};
-  float pitchRate=gyroAxes[PITCH_GYRO_AXIS]*PITCH_SIGN;
-  float yawRate=gyroAxes[YAW_GYRO_AXIS]*YAW_SIGN;
+
+  unsigned long nowUs=micros();
+  float dt=(nowUs-lastImuTime)/1000000.0f;lastImuTime=nowUs;
+  if(dt<=0.0f||dt>0.05f)dt=0.005f;
+
+  float gx=applyDeadband(((float)gyroX-gyroOffset[0])/GYRO_SCALE,GYRO_DEADBAND_DPS);
+  float gy=applyDeadband(((float)gyroY-gyroOffset[1])/GYRO_SCALE,GYRO_DEADBAND_DPS);
+  float gz=applyDeadband(((float)gyroZ-gyroOffset[2])/GYRO_SCALE,GYRO_DEADBAND_DPS);
+
+  // Roll e pitch têm referência da gravidade. Diferente do yaw, não ficam
+  // dependentes apenas da integração do giroscópio e não acumulam deriva contínua.
+  float integratedRoll=rollDeg+(gx*ROLL_GYRO_SIGN)*dt;
+  float integratedPitch=pitchDeg+(gy*PITCH_GYRO_SIGN)*dt;
   float gravity=gravityMagnitudeG();
   float alpha=FILTER_TAU/(FILTER_TAU+dt);
-  float accWeight=0;
-  if(gravity>=0.90f&&gravity<=1.10f)accWeight=1.0f-alpha;
-  float integratedPitch=pitchDeg+pitchRate*dt;
-  pitchDeg=(1.0f-accWeight)*integratedPitch+accWeight*(USE_ACCEL_PITCH?accelPitch():integratedPitch);
-  yawDeg+=yawRate*dt;
+  bool accelTrustworthy=(gravity>=ACCEL_TRUST_MIN_G&&gravity<=ACCEL_TRUST_MAX_G);
+  if(accelTrustworthy){
+    float measuredRoll=accelRoll();
+    float measuredPitch=accelPitch();
+    rollDeg=alpha*integratedRoll+(1.0f-alpha)*measuredRoll;
+    pitchDeg=alpha*integratedPitch+(1.0f-alpha)*measuredPitch;
+  }else{
+    rollDeg=integratedRoll;
+    pitchDeg=integratedPitch;
+  }
 
+  // Atualiza lentamente o bias apenas quando o sensor está realmente em repouso.
   bool instantRest=fabsf(gx)<REST_GYRO_DPS&&fabsf(gy)<REST_GYRO_DPS&&fabsf(gz)<REST_GYRO_DPS&&gravity>=REST_MIN_G&&gravity<=REST_MAX_G;
   if(instantRest){
     if(!restCandidate){restCandidate=true;restStartedAt=millis();}
@@ -259,12 +283,21 @@ void loop(){
     }
   }else restCandidate=false;
 
-  float aimX=500.0f-(yawDeg/YAW_RANGE_DEG)*500.0f;
+  // Mira horizontal usa ROLL (gravidade observável), não yaw (que deriva sem magnetômetro).
+  float aimX=500.0f-((rollDeg-rollCenterDeg)/ROLL_RANGE_DEG)*500.0f;
   float aimY=500.0f+((pitchDeg-pitchCenterDeg)/PITCH_RANGE_DEG)*500.0f;
   aimX=constrain(aimX,0.0f,1000.0f);aimY=constrain(aimY,0.0f,1000.0f);
-  if(millis()-lastAimSend>=33){Serial.print("AIM:");Serial.print((int)aimX);Serial.print(',');Serial.println((int)aimY);lastAimSend=millis();}
+  if(millis()-lastAimSend>=33){
+    Serial.print("AIM:");Serial.print((int)aimX);Serial.print(',');Serial.println((int)aimY);lastAimSend=millis();
+  }
 
-  long newMotion=motionMagnitude(),motionChange=labs(newMotion-oldMotion);
-  if(motionChange>SHAKE_LIMIT&&millis()-lastShotTime>SHOT_COOLDOWN){Serial.println("SHOOT");startShotSound();lastShotTime=millis();}
-  oldMotion=newMotion;delay(2);
+  // Disparo por movimento brusco de rotação (flick), não pela soma do vetor
+  // de aceleração, que mudava só por inclinar o pulso e gerava falsos disparos.
+  float gyroMagnitude=sqrtf(gx*gx+gy*gy+gz*gz);
+  if(gyroMagnitude>=SHOT_GYRO_THRESHOLD_DPS)shotConfirmCount++;
+  else shotConfirmCount=0;
+  if(shotConfirmCount>=SHOT_CONFIRM_SAMPLES&&millis()-lastShotTime>=SHOT_COOLDOWN){
+    Serial.println("SHOOT");startShotSound();lastShotTime=millis();shotConfirmCount=0;
+  }
+  delay(2);
 }
