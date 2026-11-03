@@ -119,15 +119,55 @@ bool readImu(){
   gyroX=(int16_t)((Wire.read()<<8)|Wire.read());
   gyroY=(int16_t)((Wire.read()<<8)|Wire.read());
   gyroZ=(int16_t)((Wire.read()<<8)|Wire.read());
-  return true;
+
+  // Uma leitura totalmente zerada não é válida para um MPU6050 em funcionamento.
+  bool allZero =
+    accelX == 0 && accelY == 0 && accelZ == 0 &&
+    gyroX == 0 && gyroY == 0 && gyroZ == 0;
+
+  return !allZero;
 }
 void invalidateCalibration(){sensorReady=false;calibrationError=false;calibrationInProgress=false;restCandidate=false;shotConfirmCount=0;}
 void recoverI2c(){
-  invalidateCalibration();mpuPresent=false;Serial.println("I2C_RECOVERY");
-  Wire.end();delay(30);Wire.begin(SDA_PIN,SCL_PIN);Wire.setClock(100000);Wire.setTimeOut(50);delay(50);
-  mpuPresent=configureMpu();consecutiveReadErrors=0;
-  if(mpuPresent){Serial.println("SENSOR_RECOVERED");Serial.println("CALIBRATION_REQUIRED");}
-  else{calibrationError=true;Serial.println("SENSOR_ERROR");}
+  invalidateCalibration();
+  mpuPresent=false;
+  Serial.println("I2C_RECOVERY");
+
+  bool recovered=false;
+
+  for(int attempt=1; attempt<=3; attempt++){
+    Serial.print("I2C_RECOVERY_ATTEMPT:");
+    Serial.println(attempt);
+
+    Wire.end();
+    delay(100);
+    Wire.begin(SDA_PIN,SCL_PIN);
+    Wire.setClock(100000);
+    Wire.setTimeOut(50);
+    delay(100);
+
+    if(configureMpu() && readImu()){
+      recovered=true;
+      break;
+    }
+  }
+
+  consecutiveReadErrors=0;
+
+  if(recovered){
+    mpuPresent=true;
+    calibrationError=false;
+    Serial.println("SENSOR_RECOVERED");
+    Serial.println("CALIBRATION_REQUIRED");
+  }else{
+    mpuPresent=false;
+    calibrationError=true;
+    Serial.println("SENSOR_ERROR");
+    Serial.println("ESP32_RESTARTING");
+    Serial.flush();
+    delay(500);
+    ESP.restart();
+  }
 }
 
 // ------------------------- CÁLCULOS DE ORIENTAÇÃO -------------------------
