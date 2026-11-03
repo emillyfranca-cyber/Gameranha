@@ -1,4 +1,3 @@
-
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 
@@ -12,23 +11,22 @@ const state = {
   running: false,
   targetTimer: null,
   clockTimer: null,
-
   port: null,
   reader: null,
   writer: null,
   serialBuffer: "",
-
   shots: 0,
   hits: 0,
   aimX: 0.5,
   aimY: 0.5,
-
   calibrationStatus: "disconnected",
   calibrationAttempt: 0,
+  calibrationRequested: false,
   pendingStart: false,
   countdownRunning: false,
   centerPending: false,
-  serialDisconnectHandler: null
+  serialDisconnectHandler: null,
+  connectionGeneration: 0
 };
 
 const levelSettings = {
@@ -42,6 +40,8 @@ const levelSettings = {
 // ============================================================
 
 function installCalibrationUI() {
+  if ($("#calibrationOverlay")) return;
+
   const style = document.createElement("style");
 
   style.textContent = `
@@ -59,9 +59,7 @@ function installCalibrationUI() {
       font-family: inherit;
     }
 
-    #calibrationOverlay.visible {
-      display: flex;
-    }
+    #calibrationOverlay.visible { display: flex; }
 
     .calibration-card {
       width: min(650px, 100%);
@@ -209,9 +207,7 @@ function installCalibrationUI() {
       text-shadow: 0 0 35px rgba(141,226,255,.4);
     }
 
-    .calibration-error {
-      color: #ff9a9a;
-    }
+    .calibration-error { color: #ff9a9a; }
 
     @media(max-width:480px) {
       .calibration-card { padding: 22px 17px; }
@@ -227,13 +223,9 @@ function installCalibrationUI() {
 
   overlay.innerHTML = `
     <div class="calibration-card">
-      <div class="calibration-eyebrow">
-        WEB HERO · PREPARAÇÃO
-      </div>
+      <div class="calibration-eyebrow">WEB HERO · PREPARAÇÃO</div>
 
-      <h2 class="calibration-title">
-        Prepare seu disparador
-      </h2>
+      <h2 class="calibration-title">Prepare seu disparador</h2>
 
       <p class="calibration-description" id="calibrationDescription">
         Antes da missão, precisamos calibrar o sensor para que
@@ -270,8 +262,7 @@ function installCalibrationUI() {
       </div>
 
       <p class="calibration-tip" id="calibrationTip">
-        Dica: mantenha o pulso relaxado. A calibração pode ser
-        repetida se o sensor detectar movimento.
+        Mantenha o pulso relaxado. A calibração pode ser repetida.
       </p>
 
       <div id="calibrationCountdown"
@@ -279,18 +270,14 @@ function installCalibrationUI() {
            style="display:none"></div>
 
       <div class="calibration-actions">
-        <button
-          id="calibrationRetry"
-          class="calibration-action calibration-primary"
-          style="display:none"
-        >
-          TENTAR NOVAMENTE
+        <button id="calibrationRetry"
+                class="calibration-action calibration-primary"
+                style="display:none">
+          INICIAR CALIBRAÇÃO
         </button>
 
-        <button
-          id="calibrationCancel"
-          class="calibration-action calibration-secondary"
-        >
+        <button id="calibrationCancel"
+                class="calibration-action calibration-secondary">
           VOLTAR
         </button>
       </div>
@@ -302,31 +289,43 @@ function installCalibrationUI() {
   $("#calibrationCancel").addEventListener("click", () => {
     state.pendingStart = false;
     state.countdownRunning = false;
+    state.calibrationRequested = false;
     hideCalibrationUI();
   });
 
-  $("#calibrationRetry").addEventListener("click", async () => {
-    if (!state.writer) {
-      toast("Conecte o controle antes de calibrar.");
-      return;
-    }
+  $("#calibrationRetry").addEventListener("click", startCalibration);
+}
 
-    state.calibrationStatus = "calibrating";
-    state.calibrationAttempt = 0;
+async function startCalibration() {
+  if (!state.writer) {
+    toast("Conecte o controle antes de calibrar.");
+    return;
+  }
 
-    showCalibrationUI();
+  state.pendingStart = false;
+  state.countdownRunning = false;
+  state.calibrationRequested = true;
+  state.calibrationStatus = "calibrating";
+  state.calibrationAttempt = 0;
+
+  showCalibrationUI();
+  updateCalibrationUI();
+
+  const sent = await sendSerialCommand("CALIBRATE\n");
+
+  if (!sent) {
+    state.calibrationStatus = "error";
+    state.calibrationRequested = false;
     updateCalibrationUI();
-
-    await sendSerialCommand("CALIBRATE\n");
-  });
+  }
 }
 
 function showCalibrationUI() {
-  $("#calibrationOverlay").classList.add("visible");
+  $("#calibrationOverlay")?.classList.add("visible");
 }
 
 function hideCalibrationUI() {
-  $("#calibrationOverlay").classList.remove("visible");
+  $("#calibrationOverlay")?.classList.remove("visible");
 }
 
 function updateCalibrationUI() {
@@ -338,15 +337,29 @@ function updateCalibrationUI() {
   const retry = $("#calibrationRetry");
   const countdown = $("#calibrationCountdown");
 
-  text.classList.remove("calibration-error");
+  if (!text || !description || !icon || !progress || !retry || !countdown) {
+    return;
+  }
 
+  text.classList.remove("calibration-error");
   retry.style.display = "none";
   countdown.style.display = "none";
 
   if (status === "waiting") {
     text.textContent = "Aguardando resposta do controle...";
+    description.textContent =
+      "O controle está conectado. Aguarde a identificação do sensor.";
     icon.textContent = "⌚";
     progress.style.width = "10%";
+
+  } else if (status === "calibration_required") {
+    text.textContent = "Sensor detectado. Pronto para calibrar.";
+    description.textContent =
+      "Posicione o sensor no pulso, mantenha o braço imóvel e pressione INICIAR CALIBRAÇÃO.";
+    icon.textContent = "⌚";
+    progress.style.width = "10%";
+    retry.textContent = "INICIAR CALIBRAÇÃO";
+    retry.style.display = "inline-block";
 
   } else if (status === "calibrating") {
     text.textContent = state.calibrationAttempt
@@ -374,7 +387,6 @@ function updateCalibrationUI() {
     text.textContent = "Calibração concluída!";
     description.textContent =
       "Ótimo! O sensor foi calibrado. Prepare-se para a missão.";
-
     icon.textContent = "✓";
     progress.style.width = "100%";
 
@@ -382,7 +394,6 @@ function updateCalibrationUI() {
     text.textContent = "Controle pronto!";
     description.textContent =
       "A calibração terminou. A missão está liberada.";
-
     icon.textContent = "🕷️";
     progress.style.width = "100%";
 
@@ -395,6 +406,7 @@ function updateCalibrationUI() {
 
     icon.textContent = "⚠️";
     progress.style.width = "0%";
+    retry.textContent = "TENTAR NOVAMENTE";
     retry.style.display = "inline-block";
   }
 }
@@ -494,9 +506,7 @@ function showView(id) {
 
 $$(".character-card").forEach(card => {
   card.addEventListener("click", () => {
-    $$(".character-card").forEach(c => {
-      c.classList.remove("selected");
-    });
+    $$(".character-card").forEach(c => c.classList.remove("selected"));
 
     card.classList.add("selected");
 
@@ -534,19 +544,13 @@ document.addEventListener("keydown", event => {
       event.target.isContentEditable
     );
 
-  if (
-    !typing &&
-    event.key.toLowerCase() === "c" &&
-    state.writer
-  ) {
+  if (!typing && event.key.toLowerCase() === "c" && state.writer) {
     event.preventDefault();
 
     state.centerPending = true;
 
     sendSerialCommand("CENTER\n").then(success => {
-      if (success) {
-        toast("Solicitando centralização da mira...");
-      }
+      if (success) toast("Solicitando centralização da mira...");
     });
   }
 });
@@ -569,7 +573,6 @@ function startGame() {
 
   state.player = name;
 
-  // Não existe início alternativo sem hardware.
   if (!state.writer || state.calibrationStatus !== "ready") {
     toast("Conecte e calibre o disparador antes de iniciar.");
     return;
@@ -598,11 +601,8 @@ function beginGame() {
   $("#setupPanel").classList.add("hidden");
   $("#playPanel").classList.remove("hidden");
 
-  $("#hudHero").textContent =
-    state.character.toUpperCase();
-
-  $("#heroAvatar").className =
-    `hero-avatar ${state.characterStyle}`;
+  $("#hudHero").textContent = state.character.toUpperCase();
+  $("#heroAvatar").className = `hero-avatar ${state.characterStyle}`;
 
   $("#scoreValue").textContent = "0000";
   $("#levelValue").innerHTML = '01 <small>/ 03</small>';
@@ -639,7 +639,6 @@ function tick() {
   if (!state.running) return;
 
   state.time--;
-
   $("#timeValue").textContent = `${state.time}s`;
 
   if (state.time <= 0) endLevel();
@@ -657,7 +656,6 @@ function endLevel() {
       `0${state.level} <small>/ 03</small>`;
 
     $("#timeValue").textContent = "30s";
-
     $("#arenaMessage").classList.remove("hidden-message");
 
     $("#arenaMessage").textContent =
@@ -760,11 +758,8 @@ function createTarget(settings) {
   const maxX = Math.max(70, arena.clientWidth - 75);
   const maxY = Math.max(150, arena.clientHeight - 120);
 
-  target.style.left =
-    `${45 + Math.random() * (maxX - 45)}px`;
-
-  target.style.top =
-    `${95 + Math.random() * (maxY - 95)}px`;
+  target.style.left = `${45 + Math.random() * (maxX - 45)}px`;
+  target.style.top = `${95 + Math.random() * (maxY - 95)}px`;
 
   target.addEventListener("click", event => {
     event.stopPropagation();
@@ -772,29 +767,21 @@ function createTarget(settings) {
     if (!state.running) return;
 
     state.hits++;
-
     addPoints(gold ? 50 : 10);
-
     drawWeb(target);
 
     target.classList.add("popped");
-
     setTimeout(() => target.remove(), 180);
   });
 
   $("#targetLayer").appendChild(target);
 
-  target._expiry = setTimeout(
-    () => target.remove(),
-    settings.targetLife
-  );
+  target._expiry = setTimeout(() => target.remove(), settings.targetLife);
 }
 
 function addPoints(points) {
   state.score += points;
-
-  $("#scoreValue").textContent =
-    String(state.score).padStart(4, "0");
+  $("#scoreValue").textContent = String(state.score).padStart(4, "0");
 }
 
 // ============================================================
@@ -807,17 +794,11 @@ function updateAim(x, y) {
 
   const arena = $("#arena");
 
-  $("#crosshair").style.left =
-    `${state.aimX * arena.clientWidth}px`;
-
-  $("#crosshair").style.top =
-    `${state.aimY * arena.clientHeight}px`;
-
+  $("#crosshair").style.left = `${state.aimX * arena.clientWidth}px`;
+  $("#crosshair").style.top = `${state.aimY * arena.clientHeight}px`;
   $("#crosshair").style.opacity = 1;
 }
 
-// O mouse continua disponível como alternativa para movimentar a mira.
-// Ele não permite iniciar a missão sem conexão e calibração do ESP32.
 $("#arena").addEventListener("pointermove", event => {
   const rect = $("#arena").getBoundingClientRect();
 
@@ -893,7 +874,6 @@ function addSvgLine(group, x1, y1, x2, y2, cls) {
   line.setAttribute("class", cls);
 
   group.appendChild(line);
-
   return line;
 }
 
@@ -905,7 +885,6 @@ function drawWebAt(x, y, radius = 54) {
   const group = $("#webEffect");
 
   svg.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
-
   group.replaceChildren();
 
   for (let i = 0; i < 12; i++) {
@@ -1046,10 +1025,7 @@ function drawMissAt(x, y) {
 
 function clearTargets() {
   $$(".target").forEach(target => {
-    if (target._expiry) {
-      clearTimeout(target._expiry);
-    }
-
+    if (target._expiry) clearTimeout(target._expiry);
     target.remove();
   });
 }
@@ -1094,7 +1070,6 @@ function renderRanking() {
         Jogue a primeira missão para inaugurar o ranking!
       </div>
     `;
-
     return;
   }
 
@@ -1105,10 +1080,7 @@ function renderRanking() {
       </span>
 
       <div>
-        <div class="rank-player">
-          ${escapeHTML(entry.name)}
-        </div>
-
+        <div class="rank-player">${escapeHTML(entry.name)}</div>
         <div class="rank-meta">
           ${escapeHTML(entry.character)}
           · FASE ${entry.level}
@@ -1171,15 +1143,18 @@ async function connectSerial() {
   }
 
   try {
-    state.port = await navigator.serial.requestPort();
+    const port = await navigator.serial.requestPort();
 
-    await state.port.open({ baudRate: 115200 });
+    state.port = port;
+    const generation = ++state.connectionGeneration;
 
-    if (!state.port.writable || !state.port.readable) {
+    await port.open({ baudRate: 115200 });
+
+    if (!port.writable || !port.readable) {
       throw new Error("A porta serial não disponibilizou leitura e escrita.");
     }
 
-    state.writer = state.port.writable.getWriter();
+    state.writer = port.writable.getWriter();
 
     $("#connectionDot").classList.add("connected");
 
@@ -1194,6 +1169,7 @@ async function connectSerial() {
 
     state.calibrationStatus = "waiting";
     state.calibrationAttempt = 0;
+    state.calibrationRequested = false;
 
     showCalibrationUI();
     updateCalibrationUI();
@@ -1207,11 +1183,13 @@ async function connectSerial() {
 
     toast("Controle conectado. Consultando o sensor...");
 
-    readSerial();
+    readSerial(port, generation);
 
     await new Promise(resolve => setTimeout(resolve, 300));
 
-    await sendSerialCommand("STATUS\n");
+    if (state.port === port) {
+      await sendSerialCommand("STATUS\n");
+    }
 
   } catch (error) {
     console.error(error);
@@ -1222,8 +1200,7 @@ async function connectSerial() {
 
     $("#connectionDot").classList.remove("connected");
 
-    $("#connectionText").textContent =
-      "DISPARADOR NÃO CONECTADO";
+    $("#connectionText").textContent = "DISPARADOR NÃO CONECTADO";
 
     $("#connectBtn").disabled = false;
     $("#connectBtn").textContent = "CONECTAR DISPARADOR";
@@ -1236,49 +1213,45 @@ async function connectSerial() {
 }
 
 async function cleanupSerial() {
+  const reader = state.reader;
+  const writer = state.writer;
+  const port = state.port;
+
+  state.reader = null;
+  state.writer = null;
+  state.port = null;
+  state.serialBuffer = "";
+  state.connectionGeneration++;
+
   try {
-    if (state.reader) {
-      await state.reader.cancel();
-    }
+    if (reader) await reader.cancel();
   } catch (error) {
     console.warn("Não foi possível cancelar a leitura:", error);
   }
 
   try {
-    if (state.reader) {
-      state.reader.releaseLock();
-    }
+    if (reader) reader.releaseLock();
   } catch (error) {
     console.warn("Não foi possível liberar o leitor:", error);
   }
 
   try {
-    if (state.writer) {
-      await state.writer.close();
-    }
+    if (writer) await writer.close();
   } catch (error) {
     console.warn("Não foi possível fechar o escritor:", error);
   }
 
   try {
-    if (state.writer) {
-      state.writer.releaseLock();
-    }
+    if (writer) writer.releaseLock();
   } catch (error) {
     console.warn("Não foi possível liberar o escritor:", error);
   }
 
   try {
-    if (state.port && state.port.readable) {
-      await state.port.close();
-    }
+    if (port) await port.close();
   } catch (error) {
     console.warn("Não foi possível fechar a porta:", error);
   }
-
-  state.reader = null;
-  state.writer = null;
-  state.port = null;
 }
 
 function handleSerialDisconnect(event) {
@@ -1288,6 +1261,7 @@ function handleSerialDisconnect(event) {
 
   state.pendingStart = false;
   state.countdownRunning = false;
+  state.calibrationRequested = false;
   state.running = false;
   state.calibrationStatus = "disconnected";
 
@@ -1295,14 +1269,14 @@ function handleSerialDisconnect(event) {
   clearInterval(state.clockTimer);
   clearTargets();
 
+  state.connectionGeneration++;
   state.writer = null;
   state.reader = null;
   state.port = null;
 
   $("#connectionDot").classList.remove("connected");
 
-  $("#connectionText").textContent =
-    "DISPARADOR DESCONECTADO";
+  $("#connectionText").textContent = "DISPARADOR DESCONECTADO";
 
   $("#connectBtn").disabled = false;
   $("#connectBtn").textContent = "CONECTAR DISPARADOR";
@@ -1319,23 +1293,21 @@ function handleSerialDisconnect(event) {
 }
 
 async function sendSerialCommand(command) {
-  if (!state.writer) {
+  const writer = state.writer;
+
+  if (!writer) {
     toast("Conecte o controle antes de enviar o comando.");
     return false;
   }
 
   try {
-    await state.writer.write(
-      new TextEncoder().encode(command)
-    );
+    await writer.write(new TextEncoder().encode(command));
 
-    return true;
+    return state.writer === writer;
 
   } catch (error) {
     console.error("Erro ao enviar comando serial:", error);
-
     toast("Falha na comunicação com o controle.");
-
     return false;
   }
 }
@@ -1343,13 +1315,12 @@ async function sendSerialCommand(command) {
 function stopForSensorRecovery(message) {
   state.pendingStart = false;
   state.countdownRunning = false;
+  state.calibrationRequested = false;
   state.running = false;
 
   clearInterval(state.targetTimer);
   clearInterval(state.clockTimer);
   clearTargets();
-
-  state.calibrationStatus = "waiting";
 
   $("#setupPanel").classList.remove("hidden");
   $("#playPanel").classList.add("hidden");
@@ -1364,7 +1335,7 @@ function stopForSensorRecovery(message) {
 }
 
 // ============================================================
-// INTERPRETAÇÃO DAS MENSAGENS
+// INTERPRETAÇÃO DAS MENSAGENS DO ESP32
 // ============================================================
 
 function handleSerialLine(rawLine) {
@@ -1392,6 +1363,22 @@ function handleSerialLine(rawLine) {
     return;
   }
 
+  if (line === "SENSOR_OK" || line === "CALIBRATION_REQUIRED") {
+    if (state.running) return;
+
+    state.pendingStart = false;
+    state.calibrationRequested = false;
+    state.calibrationStatus = "calibration_required";
+
+    $("#startBtn").disabled = true;
+    $("#startBtn").textContent = "CALIBRE O CONTROLE ↗";
+
+    showCalibrationUI();
+    updateCalibrationUI();
+
+    return;
+  }
+
   if (line === "CALIBRATING") {
     state.calibrationStatus = "calibrating";
     updateCalibrationUI();
@@ -1399,9 +1386,7 @@ function handleSerialLine(rawLine) {
   }
 
   if (line.startsWith("CALIBRATION_ATTEMPT:")) {
-    state.calibrationAttempt =
-      Number(line.split(":")[1]) || 0;
-
+    state.calibrationAttempt = Number(line.split(":")[1]) || 0;
     updateCalibrationUI();
     return;
   }
@@ -1425,6 +1410,7 @@ function handleSerialLine(rawLine) {
     line === "CENTER_ERROR"
   ) {
     state.calibrationStatus = "error";
+    state.calibrationRequested = false;
     state.centerPending = false;
 
     $("#startBtn").disabled = true;
@@ -1439,10 +1425,7 @@ function handleSerialLine(rawLine) {
     }
 
     updateCalibrationUI();
-
-    if (state.pendingStart) {
-      showCalibrationUI();
-    }
+    showCalibrationUI();
 
     return;
   }
@@ -1454,6 +1437,13 @@ function handleSerialLine(rawLine) {
   }
 
   if (line === "READY") {
+    // READY só é aceito depois de uma calibração solicitada pelo usuário.
+    if (!state.calibrationRequested) {
+      console.warn("Mensagem READY ignorada: calibração não solicitada.");
+      return;
+    }
+
+    state.calibrationRequested = false;
     state.calibrationStatus = "ready";
 
     $("#startBtn").disabled = false;
@@ -1463,11 +1453,8 @@ function handleSerialLine(rawLine) {
 
     if (state.pendingStart) {
       setTimeout(() => {
-        if (state.pendingStart) {
-          startCountdown();
-        }
+        if (state.pendingStart) startCountdown();
       }, 700);
-
     } else {
       hideCalibrationUI();
       toast("Controle calibrado e pronto para uso.");
@@ -1481,20 +1468,19 @@ function handleSerialLine(rawLine) {
       "Falha de comunicação com o sensor. Aguarde a recuperação..."
     );
 
+    state.calibrationStatus = "waiting";
+    updateCalibrationUI();
+
     return;
   }
 
   if (line === "SENSOR_RECOVERED") {
     stopForSensorRecovery(
-      "Sensor recuperado. Realizando nova calibração..."
+      "Sensor recuperado. Posicione o braço e inicie uma nova calibração."
     );
 
-    state.calibrationStatus = "calibrating";
-    state.calibrationAttempt = 0;
-
+    state.calibrationStatus = "calibration_required";
     updateCalibrationUI();
-
-    sendSerialCommand("CALIBRATE\n");
 
     return;
   }
@@ -1504,44 +1490,70 @@ function handleSerialLine(rawLine) {
 // LEITURA SERIAL
 // ============================================================
 
-async function readSerial() {
-  while (state.port && state.port.readable) {
-    const currentPort = state.port;
-
-    state.reader = currentPort.readable.getReader();
+async function readSerial(port, generation) {
+  while (
+    state.port === port &&
+    state.connectionGeneration === generation &&
+    port.readable
+  ) {
+    let reader = null;
 
     try {
+      reader = port.readable.getReader();
+      state.reader = reader;
+
       while (true) {
-        const { value, done } = await state.reader.read();
+        const { value, done } = await reader.read();
 
         if (done) break;
 
-        state.serialBuffer +=
-          new TextDecoder().decode(value);
+        if (
+          state.port !== port ||
+          state.connectionGeneration !== generation
+        ) {
+          break;
+        }
+
+        state.serialBuffer += new TextDecoder().decode(value);
 
         const lines = state.serialBuffer.split(/\r?\n/);
-
         state.serialBuffer = lines.pop() || "";
 
         for (const line of lines) {
+          if (
+            state.port !== port ||
+            state.connectionGeneration !== generation
+          ) {
+            break;
+          }
+
           handleSerialLine(line);
         }
       }
 
     } catch (error) {
-      console.error("Leitura serial interrompida:", error);
-
-    } finally {
-      try {
-        state.reader.releaseLock();
-      } catch (error) {
-        console.warn("Erro ao liberar leitura serial:", error);
+      if (state.port === port) {
+        console.error("Leitura serial interrompida:", error);
       }
 
-      state.reader = null;
+    } finally {
+      if (reader) {
+        try {
+          reader.releaseLock();
+        } catch (error) {
+          console.warn("Erro ao liberar leitura serial:", error);
+        }
+      }
+
+      if (state.reader === reader) {
+        state.reader = null;
+      }
     }
 
-    if (state.port !== currentPort) {
+    if (
+      state.port !== port ||
+      state.connectionGeneration !== generation
+    ) {
       break;
     }
   }

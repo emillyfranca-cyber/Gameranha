@@ -2,7 +2,7 @@
 #include <math.h>
 
 // ============================================================
-// WEB HERO - ESP32 + MPU6050
+// WEB HERO / GAMERANHA - ESP32 + MPU6050
 // SDA: GPIO 23 | SCL: GPIO 22 | BUZZER: GPIO 19
 // ============================================================
 
@@ -12,12 +12,11 @@
 
 const int buzzerPin = 19;
 
-const float GYRO_SCALE = 131.0f;       // ±250 graus/s
-const float ACCEL_SCALE = 16384.0f;    // ±2g
+const float GYRO_SCALE = 131.0f;
+const float ACCEL_SCALE = 16384.0f;
 
 const float YAW_RANGE_DEG = 35.0f;
 const float PITCH_RANGE_DEG = 22.0f;
-
 const float FILTER_TAU = 0.50f;
 
 const int CALIBRATION_SAMPLES = 700;
@@ -30,12 +29,26 @@ const float MAX_GRAVITY_G = 1.15f;
 const float REST_GYRO_DPS = 2.5f;
 const float REST_MIN_G = 0.95f;
 const float REST_MAX_G = 1.05f;
-const unsigned long REST_CONFIRM_MS = 700;
 
+const unsigned long REST_CONFIRM_MS = 700;
 const float BIAS_ADAPT_RATE = 0.0005f;
 
 const unsigned long SHOT_COOLDOWN = 700;
-const int SHAKE_LIMIT = 8000;
+const long SHAKE_LIMIT = 8000;
+
+const int MAX_READ_ERRORS = 3;
+
+// Mapeamento inicial dos eixos.
+// 0 = X | 1 = Y | 2 = Z
+// Use -1.0 para inverter o sentido.
+
+const int PITCH_GYRO_AXIS = 1;
+const int YAW_GYRO_AXIS = 2;
+
+const float PITCH_SIGN = 1.0f;
+const float YAW_SIGN = 1.0f;
+
+const bool USE_ACCEL_PITCH = true;
 
 // ------------------------------------------------------------
 // SENSOR
@@ -44,16 +57,17 @@ const int SHAKE_LIMIT = 8000;
 int16_t accelX = 0, accelY = 0, accelZ = 0;
 int16_t gyroX = 0, gyroY = 0, gyroZ = 0;
 
-float gyroXOffset = 0;
-float gyroYOffset = 0;
-float gyroZOffset = 0;
+float gyroOffset[3] = {0, 0, 0};
 
 float pitchDeg = 0;
 float yawDeg = 0;
 float pitchCenterDeg = 0;
 
+bool mpuPresent = false;
 bool sensorReady = false;
 bool calibrationError = false;
+bool calibrationInProgress = false;
+bool recoveryRequired = false;
 
 unsigned long lastImuTime = 0;
 unsigned long lastAimSend = 0;
@@ -63,12 +77,10 @@ unsigned long restStartedAt = 0;
 bool restCandidate = false;
 
 long oldMotion = 0;
-
 int consecutiveReadErrors = 0;
-const int MAX_READ_ERRORS = 3;
 
 // ------------------------------------------------------------
-// BUZZER NÃO BLOQUEANTE
+// BUZZER
 // ------------------------------------------------------------
 
 struct BuzzerStep {
@@ -77,6 +89,7 @@ struct BuzzerStep {
 };
 
 BuzzerStep buzzerSteps[4];
+
 int buzzerStepCount = 0;
 int buzzerStepIndex = 0;
 
@@ -87,57 +100,45 @@ unsigned long buzzerStepStarted = 0;
 unsigned long buzzerToggleAt = 0;
 unsigned long buzzerHalfPeriod = 0;
 
-void startBuzzerTone(int frequency, unsigned long duration) {
-  buzzerStepCount = 1;
+void startBuzzerSequence(const BuzzerStep *steps, int count) {
+  if (count < 1 || count > 4) return;
+
+  for (int i = 0; i < count; i++) {
+    buzzerSteps[i] = steps[i];
+  }
+
+  buzzerStepCount = count;
   buzzerStepIndex = 0;
-
-  buzzerSteps[0] = {frequency, duration};
-
   buzzerActive = true;
   buzzerPinState = false;
 
   buzzerStepStarted = millis();
   buzzerToggleAt = micros();
 
-  buzzerHalfPeriod = 500000UL / frequency;
+  buzzerHalfPeriod =
+    500000UL / max(1, buzzerSteps[0].frequency);
 
   digitalWrite(buzzerPin, LOW);
 }
 
 void startWebSound() {
-  buzzerStepCount = 4;
-  buzzerStepIndex = 0;
+  const BuzzerStep steps[4] = {
+    {600, 50},
+    {900, 50},
+    {1300, 50},
+    {1900, 90}
+  };
 
-  buzzerSteps[0] = {600, 50};
-  buzzerSteps[1] = {900, 50};
-  buzzerSteps[2] = {1300, 50};
-  buzzerSteps[3] = {1900, 90};
-
-  buzzerActive = true;
-  buzzerPinState = false;
-
-  buzzerStepStarted = millis();
-  buzzerToggleAt = micros();
-
-  buzzerHalfPeriod = 500000UL / buzzerSteps[0].frequency;
-  digitalWrite(buzzerPin, LOW);
+  startBuzzerSequence(steps, 4);
 }
 
 void startShotSound() {
-  buzzerStepCount = 2;
-  buzzerStepIndex = 0;
+  const BuzzerStep steps[2] = {
+    {1200, 35},
+    {1800, 45}
+  };
 
-  buzzerSteps[0] = {1200, 35};
-  buzzerSteps[1] = {1800, 45};
-
-  buzzerActive = true;
-  buzzerPinState = false;
-
-  buzzerStepStarted = millis();
-  buzzerToggleAt = micros();
-
-  buzzerHalfPeriod = 500000UL / buzzerSteps[0].frequency;
-  digitalWrite(buzzerPin, LOW);
+  startBuzzerSequence(steps, 2);
 }
 
 void updateBuzzer() {
@@ -149,7 +150,6 @@ void updateBuzzer() {
   BuzzerStep step = buzzerSteps[buzzerStepIndex];
 
   if (nowMs - buzzerStepStarted >= step.duration) {
-
     buzzerStepIndex++;
 
     if (buzzerStepIndex >= buzzerStepCount) {
@@ -161,7 +161,7 @@ void updateBuzzer() {
     step = buzzerSteps[buzzerStepIndex];
 
     buzzerStepStarted = nowMs;
-    buzzerHalfPeriod = 500000UL / step.frequency;
+    buzzerHalfPeriod = 500000UL / max(1, step.frequency);
     buzzerToggleAt = nowUs;
     buzzerPinState = false;
 
@@ -169,7 +169,9 @@ void updateBuzzer() {
     return;
   }
 
-  if ((long)(nowUs - buzzerToggleAt) >= (long)buzzerHalfPeriod) {
+  if ((long)(nowUs - buzzerToggleAt) >=
+      (long)buzzerHalfPeriod) {
+
     buzzerPinState = !buzzerPinState;
 
     digitalWrite(
@@ -182,31 +184,15 @@ void updateBuzzer() {
 }
 
 // ------------------------------------------------------------
-// COMUNICAÇÃO I2C
+// I2C / MPU6050
 // ------------------------------------------------------------
 
-void configureMpu() {
+bool writeMpuRegister(uint8_t reg, uint8_t value) {
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x6B);
-  Wire.write(0x00);
-  Wire.endTransmission();
+  Wire.write(reg);
+  Wire.write(value);
 
-  delay(50);
-
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x1A);
-  Wire.write(0x04);
-  Wire.endTransmission();
-
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x1B);
-  Wire.write(0x00);
-  Wire.endTransmission();
-
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x1C);
-  Wire.write(0x00);
-  Wire.endTransmission();
+  return Wire.endTransmission() == 0;
 }
 
 bool checkMpu() {
@@ -217,35 +203,30 @@ bool checkMpu() {
     return false;
   }
 
-  if (Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)1) != 1) {
+  if (Wire.requestFrom(
+      (uint8_t)MPU_ADDR,
+      (uint8_t)1
+  ) != 1) {
     return false;
   }
 
   return Wire.read() == 0x68;
 }
 
-void recoverI2c() {
-  Serial.println("I2C_RECOVERY");
+bool configureMpu() {
+  bool ok = true;
 
-  Wire.end();
-
-  delay(20);
-
-  Wire.begin(SDA_PIN, SCL_PIN);
-  Wire.setClock(100000);
-  Wire.setTimeOut(50);
+  ok &= writeMpuRegister(0x6B, 0x00);
 
   delay(50);
 
-  configureMpu();
+  ok &= writeMpuRegister(0x1A, 0x04);
+  ok &= writeMpuRegister(0x1B, 0x00);
+  ok &= writeMpuRegister(0x1C, 0x00);
 
-  consecutiveReadErrors = 0;
+  delay(20);
 
-  if (checkMpu()) {
-    Serial.println("SENSOR_RECOVERED");
-  } else {
-    Serial.println("SENSOR_ERROR");
-  }
+  return ok && checkMpu();
 }
 
 bool readImu() {
@@ -256,7 +237,10 @@ bool readImu() {
     return false;
   }
 
-  if (Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)14) != 14) {
+  if (Wire.requestFrom(
+      (uint8_t)MPU_ADDR,
+      (uint8_t)14
+  ) != 14) {
     return false;
   }
 
@@ -274,9 +258,53 @@ bool readImu() {
   return true;
 }
 
+void invalidateCalibration() {
+  sensorReady = false;
+  calibrationError = false;
+  calibrationInProgress = false;
+  restCandidate = false;
+}
+
+void recoverI2c() {
+  invalidateCalibration();
+
+  recoveryRequired = true;
+
+  Serial.println("I2C_RECOVERY");
+
+  Wire.end();
+
+  delay(30);
+
+  Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setClock(100000);
+  Wire.setTimeOut(50);
+
+  delay(50);
+
+  mpuPresent = configureMpu();
+
+  consecutiveReadErrors = 0;
+
+  if (mpuPresent) {
+    Serial.println("SENSOR_RECOVERED");
+    Serial.println("CALIBRATION_REQUIRED");
+  } else {
+    Serial.println("SENSOR_ERROR");
+  }
+}
+
 // ------------------------------------------------------------
 // CÁLCULOS
 // ------------------------------------------------------------
+
+float gravityMagnitudeG() {
+  return sqrtf(
+    (float)accelX * accelX +
+    (float)accelY * accelY +
+    (float)accelZ * accelZ
+  ) / ACCEL_SCALE;
+}
 
 float accelPitch() {
   return atan2f(
@@ -288,14 +316,6 @@ float accelPitch() {
   ) * 180.0f / PI;
 }
 
-float gravityMagnitudeG() {
-  return sqrtf(
-    (float)accelX * accelX +
-    (float)accelY * accelY +
-    (float)accelZ * accelZ
-  ) / ACCEL_SCALE;
-}
-
 long motionMagnitude() {
   return labs((long)accelX) +
          labs((long)accelY) +
@@ -303,12 +323,18 @@ long motionMagnitude() {
 }
 
 // ------------------------------------------------------------
-// CALIBRAÇÃO
+// CALIBRAÇÃO MANUAL
 // ------------------------------------------------------------
 
 bool calibrateGyro() {
+  if (!mpuPresent) {
+    Serial.println("SENSOR_ERROR");
+    return false;
+  }
+
   sensorReady = false;
   calibrationError = false;
+  calibrationInProgress = true;
 
   Serial.println("CALIBRATING");
 
@@ -317,7 +343,6 @@ bool calibrateGyro() {
     attempt <= CALIBRATION_ATTEMPTS;
     attempt++
   ) {
-
     Serial.print("CALIBRATION_ATTEMPT:");
     Serial.println(attempt);
 
@@ -329,9 +354,7 @@ bool calibrateGyro() {
     int validSamples = 0;
 
     for (int i = 0; i < CALIBRATION_SAMPLES; i++) {
-
       if (readImu()) {
-
         float values[3] = {
           (float)gyroX,
           (float)gyroY,
@@ -360,7 +383,6 @@ bool calibrateGyro() {
     bool stable = true;
 
     for (int axis = 0; axis < 3; axis++) {
-
       double mean = sums[axis] / validSamples;
 
       double variance =
@@ -386,34 +408,45 @@ bool calibrateGyro() {
       continue;
     }
 
-    gyroXOffset = sums[0] / validSamples;
-    gyroYOffset = sums[1] / validSamples;
-    gyroZOffset = sums[2] / validSamples;
-
-    Serial.println("CALIBRATION_OK");
+    for (int axis = 0; axis < 3; axis++) {
+      gyroOffset[axis] = sums[axis] / validSamples;
+    }
 
     if (!readImu()) {
-      Serial.println("CALIBRATION_ERROR");
+      calibrationInProgress = false;
       calibrationError = true;
+
+      Serial.println("CALIBRATION_ERROR");
       return false;
     }
 
-    pitchDeg = accelPitch();
+    pitchDeg = USE_ACCEL_PITCH ? accelPitch() : 0;
+
     pitchCenterDeg = pitchDeg;
     yawDeg = 0;
 
     oldMotion = motionMagnitude();
+
     lastImuTime = micros();
+    lastAimSend = 0;
 
     restCandidate = false;
+    consecutiveReadErrors = 0;
+
+    calibrationInProgress = false;
+    recoveryRequired = false;
     sensorReady = true;
 
+    Serial.println("CALIBRATION_OK");
     Serial.println("CENTER_OK");
     Serial.println("READY");
+
+    startWebSound();
 
     return true;
   }
 
+  calibrationInProgress = false;
   calibrationError = true;
   sensorReady = false;
 
@@ -432,7 +465,8 @@ void centerAim() {
     return;
   }
 
-  pitchDeg = accelPitch();
+  pitchDeg = USE_ACCEL_PITCH ? accelPitch() : pitchDeg;
+
   pitchCenterDeg = pitchDeg;
   yawDeg = 0;
 
@@ -447,38 +481,37 @@ void handleSerialCommands() {
   static String command = "";
 
   while (Serial.available() > 0) {
-
     char c = (char)Serial.read();
 
     if (c == '\n' || c == '\r') {
-
       command.trim();
       command.toUpperCase();
 
       if (command == "STATUS") {
-
         if (sensorReady) {
           Serial.println("READY");
+        } else if (calibrationInProgress) {
+          Serial.println("CALIBRATING");
         } else if (calibrationError) {
           Serial.println("CALIBRATION_ERROR");
+        } else if (mpuPresent) {
+          Serial.println("CALIBRATION_REQUIRED");
         } else {
-          Serial.println("CALIBRATING");
+          Serial.println("SENSOR_ERROR");
+        }
+
+      } else if (command == "CALIBRATE") {
+        if (!calibrationInProgress) {
+          calibrateGyro();
         }
 
       } else if (command == "CENTER") {
-
         centerAim();
-
-      } else if (command == "CALIBRATE") {
-
-        calibrateGyro();
-
       }
 
       command = "";
 
-    } else if (command.length() < 20) {
-
+    } else if (command.length() < 24) {
       command += c;
     }
   }
@@ -498,23 +531,19 @@ void setup() {
   Wire.setClock(100000);
   Wire.setTimeOut(50);
 
-  delay(100);
+  delay(150);
 
-  if (!checkMpu()) {
-    Serial.println("SENSOR_ERROR");
+  mpuPresent = configureMpu();
+
+  if (mpuPresent) {
+    Serial.println("SENSOR_OK");
+    Serial.println("CALIBRATION_REQUIRED");
+  } else {
     calibrationError = true;
-    return;
+    Serial.println("SENSOR_ERROR");
   }
 
-  configureMpu();
-
-  delay(100);
-
-  calibrateGyro();
-
-  if (sensorReady) {
-    startWebSound();
-  }
+  // Não calibrar automaticamente ao ligar.
 }
 
 // ------------------------------------------------------------
@@ -531,7 +560,6 @@ void loop() {
   }
 
   if (!readImu()) {
-
     consecutiveReadErrors++;
 
     if (consecutiveReadErrors >= MAX_READ_ERRORS) {
@@ -547,20 +575,27 @@ void loop() {
   unsigned long nowUs = micros();
 
   float dt = (nowUs - lastImuTime) / 1000000.0f;
+
   lastImuTime = nowUs;
 
   if (dt <= 0 || dt > 0.05f) {
     dt = 0.005f;
   }
 
-  // Velocidades angulares corrigidas
-  float gx = ((float)gyroX - gyroXOffset) / GYRO_SCALE;
-  float gy = ((float)gyroY - gyroYOffset) / GYRO_SCALE;
-  float gz = ((float)gyroZ - gyroZOffset) / GYRO_SCALE;
+  float gx = ((float)gyroX - gyroOffset[0]) / GYRO_SCALE;
+  float gy = ((float)gyroY - gyroOffset[1]) / GYRO_SCALE;
+  float gz = ((float)gyroZ - gyroOffset[2]) / GYRO_SCALE;
+
+  float gyroAxes[3] = {gx, gy, gz};
+
+  float pitchRate =
+    gyroAxes[PITCH_GYRO_AXIS] * PITCH_SIGN;
+
+  float yawRate =
+    gyroAxes[YAW_GYRO_AXIS] * YAW_SIGN;
 
   float gravity = gravityMagnitudeG();
 
-  // Filtro complementar
   float alpha = FILTER_TAU / (FILTER_TAU + dt);
 
   float accWeight = 0;
@@ -569,18 +604,19 @@ void loop() {
     accWeight = 1.0f - alpha;
   }
 
-  float integratedPitch = pitchDeg + gy * dt;
+  float integratedPitch = pitchDeg + pitchRate * dt;
 
   pitchDeg =
     (1.0f - accWeight) * integratedPitch +
-    accWeight * accelPitch();
+    accWeight * (
+      USE_ACCEL_PITCH
+        ? accelPitch()
+        : integratedPitch
+    );
 
-  // Yaw sem referência absoluta
-  yawDeg += gz * dt;
+  yawDeg += yawRate * dt;
 
-  // ----------------------------------------------------------
-  // COMPENSAÇÃO DE BIAS DURANTE REPOUSO
-  // ----------------------------------------------------------
+  // Compensação de bias durante repouso
 
   bool instantRest =
     fabsf(gx) < REST_GYRO_DPS &&
@@ -590,32 +626,27 @@ void loop() {
     gravity <= REST_MAX_G;
 
   if (instantRest) {
-
     if (!restCandidate) {
       restCandidate = true;
       restStartedAt = millis();
     }
 
     if (millis() - restStartedAt >= REST_CONFIRM_MS) {
+      gyroOffset[0] +=
+        (gyroX - gyroOffset[0]) * BIAS_ADAPT_RATE;
 
-      gyroXOffset +=
-        (gyroX - gyroXOffset) * BIAS_ADAPT_RATE;
+      gyroOffset[1] +=
+        (gyroY - gyroOffset[1]) * BIAS_ADAPT_RATE;
 
-      gyroYOffset +=
-        (gyroY - gyroYOffset) * BIAS_ADAPT_RATE;
-
-      gyroZOffset +=
-        (gyroZ - gyroZOffset) * BIAS_ADAPT_RATE;
+      gyroOffset[2] +=
+        (gyroZ - gyroOffset[2]) * BIAS_ADAPT_RATE;
     }
 
   } else {
-
     restCandidate = false;
   }
 
-  // ----------------------------------------------------------
-  // MIRA
-  // ----------------------------------------------------------
+  // Mira
 
   float aimX =
     500.0f - (yawDeg / YAW_RANGE_DEG) * 500.0f;
@@ -628,7 +659,6 @@ void loop() {
   aimY = constrain(aimY, 0.0f, 1000.0f);
 
   if (millis() - lastAimSend >= 33) {
-
     Serial.print("AIM:");
     Serial.print((int)aimX);
     Serial.print(',');
@@ -637,9 +667,7 @@ void loop() {
     lastAimSend = millis();
   }
 
-  // ----------------------------------------------------------
-  // DISPARO POR MOVIMENTO
-  // ----------------------------------------------------------
+  // Disparo por movimento
 
   long newMotion = motionMagnitude();
 
@@ -649,7 +677,6 @@ void loop() {
     motionChange > SHAKE_LIMIT &&
     millis() - lastShotTime > SHOT_COOLDOWN
   ) {
-
     Serial.println("SHOOT");
 
     startShotSound();
