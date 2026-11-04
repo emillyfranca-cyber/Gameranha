@@ -30,7 +30,12 @@
       <button class="tab" data-view="howView">COMO JOGAR</button>
     </nav>
 
-    <div class="live-pill"><span></span> ARCADE MODE</div>
+    <div class="top-actions">
+      <button id="soundBtn" class="icon-btn" type="button" title="Som (M)" aria-label="Ligar ou desligar o som">🔊</button>
+      <button id="fullscreenBtn" class="icon-btn" type="button" title="Tela cheia (F)" aria-label="Tela cheia">⛶</button>
+      <button id="operatorBtn" class="icon-btn" type="button" title="Painel do operador (O)" aria-label="Painel do operador">⚙</button>
+      <div class="live-pill"><span></span> ARCADE MODE</div>
+    </div>
   </header>
 
   <main>
@@ -119,6 +124,13 @@
           </button>
         </div>
 
+        <span class="input-label">DIFICULDADE</span>
+        <div class="difficulty-row" role="group" aria-label="Dificuldade">
+          <button class="chip" type="button" data-difficulty="easy">FÁCIL</button>
+          <button class="chip selected" type="button" data-difficulty="normal">NORMAL</button>
+          <button class="chip" type="button" data-difficulty="hard">DIFÍCIL</button>
+        </div>
+
         <!-- CONEXÃO ANTES DO INÍCIO DA MISSÃO -->
         <div class="connection-status setup-connection">
           <span id="connectionDot"></span>
@@ -136,6 +148,14 @@
             type="button"
           >
             CONECTAR DISPARADOR
+          </button>
+
+          <button
+            id="demoBtn"
+            class="secondary-btn"
+            type="button"
+          >
+            JOGAR SEM CONTROLE (DEMO)
           </button>
         </div>
 
@@ -167,10 +187,16 @@
           </div>
 
           <div>
+            <span class="hud-label">COMBO</span>
+            <strong id="comboValue">0 <small>x1</small></strong>
+          </div>
+
+          <div>
             <span class="hud-label">TEMPO</span>
             <strong id="timeValue">30s</strong>
           </div>
         </div>
+        <div class="timebar"><i id="timeBar"></i></div>
 
         <div id="arena" class="arena" aria-label="Área do jogo">
           <div class="city-image-overlay"></div>
@@ -226,8 +252,9 @@
         </div>
 
         <div class="game-note">
-          Mire com o movimento do pulso e acione o disparador físico
-          para lançar a teia.
+          Mire com o movimento do pulso e aperte o botão do disparador
+          para lançar a teia. Acertos seguidos aumentam o combo;
+          cuidado com os civis!
         </div>
       </section>
     </section>
@@ -254,17 +281,19 @@
             <h2>Ranking local</h2>
           </div>
 
-          <button id="clearRankingBtn" class="text-btn">
-            LIMPAR PLACAR
-          </button>
+          <div class="ranking-actions">
+            <button id="boardBtn" class="text-btn" type="button">MODO TELÃO</button>
+            <button id="exportCsvBtn" class="text-btn" type="button">EXPORTAR CSV</button>
+            <button id="exportJsonBtn" class="text-btn" type="button">BACKUP JSON</button>
+            <button id="clearRankingBtn" class="text-btn" type="button">LIMPAR PLACAR</button>
+          </div>
         </div>
 
         <div id="rankingList"></div>
 
         <p class="local-warning">
           Este ranking fica salvo neste navegador e computador.
-          Para compartilhar resultados entre computadores,
-          será necessário um servidor ou banco de dados.
+          Use EXPORTAR CSV ou BACKUP JSON para guardar os resultados.
         </p>
       </section>
     </section>
@@ -311,8 +340,10 @@
           <div>
             <h3>Capture os bandidos</h3>
             <p>
-              Mire movimentando o pulso e dispare a teia nos criminosos
-              que aparecem pela cidade. Os inimigos especiais valem mais pontos.
+              Mire movimentando o pulso e aperte o botão para disparar a teia
+              nos criminosos. Os dourados valem 50 pontos, o relógio dá +3s e
+              acertos seguidos formam combos (x2, x3, x4).
+              <strong>Não acerte os civis</strong>: eles tiram pontos e zeram o combo!
             </p>
           </div>
         </div>
@@ -323,7 +354,8 @@
             <h3>Supere as três fases</h3>
             <p>
               Você tem 30 segundos por fase.
-              Os alvos ficam mais rápidos a cada nível.
+              Os alvos ficam mais rápidos a cada nível e, na última fase,
+              um chefe aparece e precisa de vários acertos.
             </p>
           </div>
         </div>
@@ -347,6 +379,52 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="script.js"></script>
+  <!-- PAINEL DO OPERADOR (tecla O) -->
+  <div id="operatorPanel" class="operator-panel" role="dialog" aria-label="Painel do operador">
+    <div class="operator-card">
+      <h2>PAINEL DO OPERADOR</h2>
+      <p id="opStatus" class="op-status"></p>
+
+      <div class="op-group">
+        <span class="input-label">CONTROLE</span>
+        <div class="op-buttons">
+          <button id="opRecalibrate" class="secondary-btn" type="button">RECALIBRAR</button>
+          <button id="opCenter" class="secondary-btn" type="button">CENTRALIZAR MIRA (C)</button>
+        </div>
+        <label class="op-slider">Alcance vertical (menor = mais sensível) <b id="sensPitchValue">22°</b>
+          <input id="sensPitch" type="range" min="10" max="40" step="1" value="22">
+        </label>
+        <label class="op-slider">Alcance horizontal (menor = mais sensível) <b id="sensRollValue">35°</b>
+          <input id="sensRoll" type="range" min="15" max="60" step="1" value="35">
+        </label>
+      </div>
+
+      <div class="op-group">
+        <span class="input-label">PARTIDA</span>
+        <div class="op-buttons">
+          <button id="opSkip" class="secondary-btn" type="button">PULAR FASE</button>
+          <button id="opAbort" class="secondary-btn" type="button">ENCERRAR PARTIDA</button>
+        </div>
+      </div>
+
+      <div class="op-group">
+        <span class="input-label">RANKING</span>
+        <div class="op-buttons">
+          <button id="opCsv" class="secondary-btn" type="button">EXPORTAR CSV</button>
+          <button id="opJson" class="secondary-btn" type="button">BACKUP JSON</button>
+        </div>
+      </div>
+
+      <button id="opClose" class="primary-btn" type="button">FECHAR</button>
+    </div>
+  </div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/ranking.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/calibration-ui.js"></script>
+  <script src="js/controller.js"></script>
+  <script src="js/main.js"></script>
 </body>
 </html>

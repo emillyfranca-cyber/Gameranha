@@ -1,0 +1,347 @@
+// Comunicação com o controle (ESP32 via Web Serial) e modo demonstração.
+//
+// Protocolo ESP32 -> navegador (uma linha por mensagem):
+//   HELLO:FW2            versão do firmware
+//   SENSOR_OK / SENSOR_ERROR / CALIBRATION_REQUIRED / CALIBRATING / CALIBRATION_ATTEMPT:n
+//   CALIBRATION_RETRY / CALIBRATION_OK / CALIBRATION_ERROR / READY / CENTER_OK / CENTER_ERROR
+//   I2C_RECOVERY / SENSOR_RECOVERED
+//   AIM:x,y              mira (0..1000)
+//   SHOOT                disparo (botão ou movimento brusco)
+//   SENS_OK:p,r          sensibilidade atual (graus de alcance vertical/horizontal)
+// Protocolo navegador -> ESP32:
+//   STATUS, CALIBRATE, CENTER, SENS:p,r
+//   HIT, MISS, PENALTY, LEVEL   (feedback sonoro e de vibração no controle)
+
+const ctl = {
+  mode: 'none',                 // none | hardware | demo
+  port: null, reader: null, writer: null, buffer: '', generation: 0,
+  status: 'disconnected',       // disconnected | waiting | calibration_required | calibrating | retry | calibrated | ready | error
+  attempt: 0,
+  pendingStart: false, countdownRunning: false, calibrationRequested: false, centerPending: false,
+  fw: null,
+  sens: { pitch: 22, roll: 35 },
+  disconnectHandler: null
+};
+
+const Controller = (() => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  // ------------------------- INTERFACE -------------------------
+  function setConnectionUI({ connected, text, connectLabel, connectDisabled, startLabel, startDisabled, demoLabel }) {
+    $('#connectionDot').classList.toggle('connected', connected);
+    $('#connectionText').textContent = text;
+    $('#connectBtn').textContent = connectLabel;
+    $('#connectBtn').disabled = connectDisabled;
+    $('#startBtn').innerHTML = `${startLabel} <span>↗</span>`;
+    $('#startBtn').disabled = startDisabled;
+    if (demoLabel) $('#demoBtn').textContent = demoLabel;
+  }
+
+  const DISCONNECTED_UI = {
+    connected: false, text: 'DISPARADOR NÃO CONECTADO',
+    connectLabel: 'CONECTAR DISPARADOR', connectDisabled: false,
+    startLabel: 'AGUARDANDO CONTROLE', startDisabled: true,
+    demoLabel: 'JOGAR SEM CONTROLE (DEMO)'
+  };
+
+  // ------------------------- MODO DEMO -------------------------
+  function enterDemo() {
+    if (ctl.port) { toast('Desconecte o controle antes de usar o modo demo.'); return; }
+    ctl.mode = 'demo';
+    ctl.status = 'ready';
+    setConnectionUI({
+      connected: true, text: 'MODO DEMO · MOUSE OU TOQUE',
+      connectLabel: 'CONECTAR DISPARADOR', connectDisabled: true,
+      startLabel: 'INICIAR MISSÃO', startDisabled: false,
+      demoLabel: 'USAR CONTROLE FÍSICO'
+    });
+    toast('Modo demo ativado: mire com o mouse e clique para disparar.');
+  }
+
+  function leaveDemo() {
+    ctl.mode = 'none';
+    ctl.status = 'disconnected';
+    ctl.pendingStart = false;
+    setConnectionUI(DISCONNECTED_UI);
+  }
+
+  const toggleDemo = () => (ctl.mode === 'demo' ? leaveDemo() : enterDemo());
+
+  // ------------------------- ENVIO -------------------------
+  async function send(command, quiet = false) {
+    const writer = ctl.writer;
+    if (!writer) {
+      if (!quiet) toast('Conecte o controle antes de enviar o comando.');
+      return false;
+    }
+    try {
+      await writer.write(encoder.encode(command));
+      return ctl.writer === writer;
+    } catch (error) {
+      console.error('Erro ao enviar comando serial:', error);
+      if (!quiet) toast('Falha na comunicação com o controle.');
+      return false;
+    }
+  }
+
+  // Feedback de jogo (som/vibração no controle). Silencioso e opcional.
+  function feedback(name) {
+    if (ctl.mode === 'hardware' && ctl.writer) send(`${name}\n`, true);
+  }
+
+  async function startCalibration() {
+    if (!ctl.writer) { toast('Conecte o controle antes de calibrar.'); return; }
+    if (ctl.status === 'calibrating') { toast('A calibração já está em andamento.'); return; }
+    ctl.pendingStart = false;
+    ctl.countdownRunning = false;
+    ctl.calibrationRequested = true;
+    ctl.status = 'calibrating';
+    ctl.attempt = 0;
+    showCalibrationUI();
+    updateCalibrationUI();
+    if (!(await send('CALIBRATE\n'))) {
+      ctl.status = 'error';
+      ctl.calibrationRequested = false;
+      updateCalibrationUI();
+    }
+  }
+
+  async function center() {
+    if (ctl.mode !== 'hardware') return;
+    ctl.centerPending = true;
+    if (await send('CENTER\n')) toast('Solicitando centralização da mira...');
+  }
+
+  function setSensitivity(pitch, roll) {
+    ctl.sens = { pitch, roll };
+    store.set('webHeroSens', ctl.sens);
+    send(`SENS:${pitch.toFixed(1)},${roll.toFixed(1)}\n`, true);
+  }
+
+  // ------------------------- CONEXÃO -------------------------
+  async function connect(knownPort = null) {
+    if (!('serial' in navigator)) { toast('Web Serial não disponível. Use Chrome ou Edge atualizado.'); return; }
+    if (ctl.port) { toast('Já existe um controle conectado.'); return; }
+    if (ctl.mode === 'demo') { toast('Saia do modo demo para conectar o controle.'); return; }
+
+    let port = knownPort;
+    try {
+      if (!port) port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      if (!port.writable || !port.readable) throw new Error('A porta serial não disponibilizou leitura e escrita.');
+
+      ctl.port = port;
+      ctl.mode = 'hardware';
+      ctl.generation++;
+      const generation = ctl.generation;
+      ctl.buffer = '';
+      ctl.fw = null;
+      ctl.writer = port.writable.getWriter();
+
+      setConnectionUI({
+        connected: true, text: 'DISPARADOR CONECTADO · VALIDANDO SENSOR',
+        connectLabel: 'DISPARADOR CONECTADO', connectDisabled: true,
+        startLabel: 'AGUARDANDO CALIBRAÇÃO', startDisabled: true
+      });
+      $('#demoBtn').disabled = true;
+      ctl.status = 'waiting';
+      ctl.attempt = 0;
+      ctl.calibrationRequested = false;
+      showCalibrationUI();
+      updateCalibrationUI();
+
+      ctl.disconnectHandler = handleDisconnect;
+      navigator.serial.addEventListener('disconnect', ctl.disconnectHandler);
+      toast('Controle conectado. Consultando o sensor...');
+      readLoop(port, generation);
+
+      await sleep(250);
+      if (ctl.port === port) await send('STATUS\n', true);
+      send(`SENS:${ctl.sens.pitch.toFixed(1)},${ctl.sens.roll.toFixed(1)}\n`, true);
+
+      setTimeout(() => {
+        if (ctl.port === port && !ctl.fw) toast('Firmware desatualizado: grave a versão nova no ESP32.');
+      }, 3000);
+    } catch (error) {
+      if (error?.name !== 'NotFoundError') console.error(error); // NotFoundError = usuário cancelou
+      if (port && ctl.port !== port) { try { await port.close(); } catch (_) { /* já fechada */ } }
+      await cleanup();
+      ctl.mode = 'none';
+      ctl.status = 'disconnected';
+      setConnectionUI(DISCONNECTED_UI);
+      $('#demoBtn').disabled = false;
+      hideCalibrationUI();
+      if (error?.name !== 'NotFoundError') toast('Não foi possível conectar. Confira a placa e a permissão USB.');
+    }
+  }
+
+  async function cleanup() {
+    const { reader, writer, port } = ctl;
+    ctl.reader = ctl.writer = ctl.port = null;
+    ctl.buffer = '';
+    ctl.generation++;
+    if (ctl.disconnectHandler) {
+      navigator.serial.removeEventListener('disconnect', ctl.disconnectHandler);
+      ctl.disconnectHandler = null;
+    }
+    try { if (reader) await reader.cancel(); } catch (e) { console.warn('Não foi possível cancelar a leitura:', e); }
+    try { if (reader) reader.releaseLock(); } catch (e) { console.warn('Não foi possível liberar o leitor:', e); }
+    try { if (writer) await writer.close(); } catch (e) { console.warn('Não foi possível fechar o escritor:', e); }
+    try { if (writer) writer.releaseLock(); } catch (e) { console.warn('Não foi possível liberar o escritor:', e); }
+    try { if (port) await port.close(); } catch (e) { console.warn('Não foi possível fechar a porta:', e); }
+  }
+
+  function handleDisconnect(event) {
+    if (event?.target && ctl.port && event.target !== ctl.port) return;
+    Object.assign(ctl, {
+      pendingStart: false, countdownRunning: false, calibrationRequested: false,
+      status: 'disconnected', mode: 'none', writer: null, reader: null, port: null, buffer: ''
+    });
+    ctl.generation++;
+    Game.abort();
+    setConnectionUI(DISCONNECTED_UI);
+    $('#demoBtn').disabled = false;
+    hideCalibrationUI();
+    toast('Disparador desconectado. Conecte novamente para continuar.');
+  }
+
+  // Reconecta sozinho se o navegador já tem permissão para a porta.
+  async function autoReconnect() {
+    if (!('serial' in navigator)) return;
+    navigator.serial.addEventListener('connect', event => {
+      if (!ctl.port && ctl.mode === 'none') connect(event.target);
+    });
+    try {
+      const ports = await navigator.serial.getPorts();
+      if (ports.length === 1 && !ctl.port && ctl.mode === 'none') connect(ports[0]);
+    } catch (_) { /* sem permissão: o usuário usa o botão */ }
+  }
+
+  // ------------------------- LEITURA -------------------------
+  async function readLoop(port, generation) {
+    const valid = () => ctl.port === port && ctl.generation === generation;
+    while (valid() && port.readable) {
+      let reader = null;
+      try {
+        reader = port.readable.getReader();
+        ctl.reader = reader;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (!valid()) break;
+          ctl.buffer += decoder.decode(value, { stream: true });
+          const lines = ctl.buffer.split(/\r?\n/);
+          ctl.buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!valid()) break;
+            handleLine(line);
+          }
+        }
+      } catch (error) {
+        if (ctl.port === port) console.error('Leitura serial interrompida:', error);
+      } finally {
+        if (reader) { try { reader.releaseLock(); } catch (e) { console.warn('Erro ao liberar leitura serial:', e); } }
+        if (ctl.reader === reader) ctl.reader = null;
+      }
+      if (!valid()) break;
+    }
+  }
+
+  function interruptMission(message) {
+    Object.assign(ctl, { pendingStart: false, countdownRunning: false, calibrationRequested: false });
+    Game.abort();
+    $('#startBtn').disabled = true;
+    $('#startBtn').innerHTML = 'AGUARDANDO CALIBRAÇÃO <span>↗</span>';
+    showCalibrationUI();
+    updateCalibrationUI();
+    toast(message);
+  }
+
+  function handleLine(rawLine) {
+    const line = rawLine.trim().toUpperCase();
+    if (!line) return;
+
+    if (line === 'SHOOT') { Game.shootAtAim({ silent: true }); return; }
+    if (line.startsWith('AIM:')) {
+      const [x, y] = line.slice(4).split(',').map(Number);
+      if (Number.isFinite(x) && Number.isFinite(y)) Game.updateAim(x, y);
+      return;
+    }
+    if (line.startsWith('HELLO:')) { ctl.fw = line.slice(6); return; }
+    if (line.startsWith('SENS_OK:')) {
+      const [pitch, roll] = line.slice(8).split(',').map(Number);
+      if (Number.isFinite(pitch) && Number.isFinite(roll)) {
+        ctl.sens = { pitch, roll };
+        document.dispatchEvent(new CustomEvent('sensitivity', { detail: ctl.sens }));
+      }
+      return;
+    }
+
+    if (line === 'SENSOR_OK' || line === 'CALIBRATION_REQUIRED') {
+      if (Game.isRunning()) return;
+      ctl.pendingStart = false;
+      ctl.calibrationRequested = false;
+      ctl.status = 'calibration_required';
+      $('#startBtn').disabled = true;
+      $('#startBtn').innerHTML = 'CALIBRE O CONTROLE <span>↗</span>';
+      showCalibrationUI();
+      updateCalibrationUI();
+      return;
+    }
+    if (line === 'CALIBRATING') { ctl.status = 'calibrating'; showCalibrationUI(); updateCalibrationUI(); return; }
+    if (line.startsWith('CALIBRATION_ATTEMPT:')) { ctl.attempt = Number(line.split(':')[1]) || 0; updateCalibrationUI(); return; }
+    if (line === 'CALIBRATION_RETRY') { ctl.status = 'retry'; updateCalibrationUI(); return; }
+    if (line === 'CALIBRATION_OK') { ctl.status = 'calibrated'; updateCalibrationUI(); return; }
+
+    if (['CALIBRATION_ERROR', 'SENSOR_ERROR', 'IMU_READ_ERROR', 'CENTER_ERROR'].includes(line)) {
+      if (Game.isRunning()) interruptMission('Falha no sensor. A missão foi interrompida; calibre novamente.');
+      ctl.status = 'error';
+      ctl.calibrationRequested = false;
+      ctl.centerPending = false;
+      $('#startBtn').disabled = true;
+      $('#startBtn').innerHTML = 'CALIBRAÇÃO NECESSÁRIA <span>↗</span>';
+      showCalibrationUI();
+      updateCalibrationUI();
+      return;
+    }
+    if (line === 'CENTER_OK') { ctl.centerPending = false; toast('Centro da mira confirmado.'); return; }
+
+    // READY também é a resposta ao STATUS quando o ESP32 já está calibrado.
+    if (line === 'READY') {
+      ctl.calibrationRequested = false;
+      ctl.status = 'ready';
+      $('#startBtn').disabled = false;
+      $('#startBtn').innerHTML = 'INICIAR MISSÃO <span>↗</span>';
+      updateCalibrationUI();
+      if (ctl.pendingStart) {
+        setTimeout(() => { if (ctl.pendingStart) startCountdown(); }, 500);
+      } else {
+        hideCalibrationUI();
+        toast('Controle calibrado e pronto para uso.');
+      }
+      return;
+    }
+    if (line === 'I2C_RECOVERY') {
+      interruptMission('Falha de comunicação com o sensor. Aguarde a recuperação...');
+      ctl.status = 'waiting';
+      updateCalibrationUI();
+      return;
+    }
+    if (line === 'SENSOR_RECOVERED') {
+      interruptMission('Sensor recuperado. Posicione o braço e inicie uma nova calibração.');
+      ctl.status = 'calibration_required';
+      updateCalibrationUI();
+    }
+  }
+
+  return {
+    mode: () => ctl.mode,
+    isReady: () => ctl.mode === 'demo' || (ctl.mode === 'hardware' && !!ctl.writer && ctl.status === 'ready'),
+    connect, toggleDemo, enterDemo, leaveDemo,
+    send, feedback, startCalibration, center, setSensitivity, autoReconnect
+  };
+})();
+
+// Restaura a sensibilidade salva neste navegador.
+ctl.sens = store.get('webHeroSens', ctl.sens);
