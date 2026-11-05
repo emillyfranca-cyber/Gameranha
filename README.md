@@ -55,7 +55,14 @@ Formato do arquivo:
   alvos mais rápidos, mais curtos, em maior número e com área de acerto menor.
 - O **disparo só acontece ao apertar o botão do controle.** Mexer a mão não atira.
 - **Combo** (x2 com 5 acertos, x3 com 10, x4 com 15).
-- Alvos: bandido (10), dourado (50), relógio (+3 s), **civil** (−30 e zera o combo) e **chefe** na fase 3.
+- Alvos (desenhados em SVG, com animações):
+  - **bandido** (10 pontos): 4 visuais diferentes sorteados (capuz, gorro, boné, ninja);
+  - **robô dourado** (50);
+  - **relógio voador** (+3 s);
+  - **civil** (−30 e zera o combo): sempre sorridente, acenando e com balão de "!";
+  - **chefe** na fase 3: leva vários acertos, pisca ao ser atingido e **fica furioso** com metade da vida.
+- Os alvos sobem do chão ao surgir, **tremem e piscam antes de sumir**, mostram uma **barra com o tempo restante** e,
+  ao serem atingidos, ficam presos em um **casulo de teia**. Na fase fácil eles são maiores.
 - O **codinome é pedido só no final**, na tela de resultado (precisão, melhor combo e posição no ranking).
   Sem salvar, volta sozinho ao início em 60 s.
 - Modo atração: com a tela parada por 60 s, mostra o ranking em tela cheia.
@@ -108,6 +115,8 @@ O firmware se identifica com `HELLO:FW4`; o site avisa se a versão estiver desa
 ```
 index.html          páginas e painel do operador
 style.css           visual
+css/alvos.css       alvos, animações e tela de escolha de heróis (carrega depois do style.css)
+js/sprites.js       desenhos SVG dos alvos (bandidos, robô, civil, relógio, chefe)
 js/utils.js         utilidades (toast, storage, download) e migração das chaves antigas
 js/audio.js         efeitos sonoros (Web Audio)
 js/ranking.js       ranking: arquivo JSON (File System Access) + cópia no navegador

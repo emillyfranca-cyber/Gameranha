@@ -10,10 +10,11 @@ const Game = (() => {
   // A dificuldade sobe a cada fase: o jogo sempre começa FÁCIL.
   //   interval = tempo entre novos alvos (ms) | life = quanto o alvo fica na tela (ms)
   //   count = alvos simultâneos | pad = folga (px) na área de acerto
+  //   size = tamanho dos alvos (fase fácil = alvos grandes)
   const LEVELS = {
-    1: { label: 'FÁCIL',   interval: 1300, life: 2900, count: 1, civil: 0,    clock: 0,    pad: 16 },
-    2: { label: 'MÉDIO',   interval: 950,  life: 2200, count: 2, civil: 0.10, clock: 0.06, pad: 10 },
-    3: { label: 'DIFÍCIL', interval: 650,  life: 1600, count: 2, civil: 0.16, clock: 0.06, pad: 6 }
+    1: { label: 'FÁCIL',   interval: 1300, life: 2900, count: 1, civil: 0,    clock: 0,    pad: 16, size: 1.3 },
+    2: { label: 'MÉDIO',   interval: 950,  life: 2200, count: 2, civil: 0.10, clock: 0.06, pad: 10, size: 1.15 },
+    3: { label: 'DIFÍCIL', interval: 650,  life: 1600, count: 2, civil: 0.16, clock: 0.06, pad: 6,  size: 1 }
   };
   const BOSS_HP = 4;
 
@@ -254,7 +255,7 @@ const Game = (() => {
   // ------------------------- ALVOS -------------------------
   function spawnTargets() {
     if (g.phase !== 'playing') return;
-    const current = $$('.target:not(.boss)').length;
+    const current = $$('.target:not(.boss):not(.popped)').length;
     for (let i = current; i < LEVELS[g.level].count; i++) createTarget(pickKind());
   }
 
@@ -282,13 +283,18 @@ const Game = (() => {
     target.className = `target ${kind}`;
     target.dataset.kind = kind;
     target.setAttribute('aria-hidden', 'true');
+    const life = kind === 'boss' ? BOSS_LIFE_MS : level.life;
+    target.style.setProperty('--d', `${(-Math.random() * 3).toFixed(2)}s`); // desencontra os balanços
+    target.style.setProperty('--s', level.size);
     target.innerHTML = `
-      <span class="villain-shadow">
-        <i class="villain-hood"></i><i class="villain-face"></i><i class="villain-body"></i>
-        <i class="villain-arm left"></i><i class="villain-arm right"></i>
-      </span>
+      <div class="target-body">${Sprites.render(kind)}</div>
+      <span class="cocoon"></span>
       <span class="wanted-tag">${tags[kind]}</span>
-      ${kind === 'boss' ? '<span class="boss-hp"><i></i></span>' : ''}`;
+      ${kind === 'boss'
+        ? '<span class="boss-hp"><i></i></span>'
+        : `<span class="life-bar"><i style="animation-duration:${life}ms"></i></span>`}`;
+    target.classList.add('spawning');
+    setTimeout(() => target.classList.remove('spawning'), 450);
 
     const margin = kind === 'boss' ? 60 : 0;
     const maxX = Math.max(70, a.clientWidth - 75 - margin);
@@ -310,20 +316,25 @@ const Game = (() => {
     if (kind === 'boss') {
       target._hp = target._maxHp = BOSS_HP;
     }
-    const life = kind === 'boss' ? BOSS_LIFE_MS : level.life;
     target._expiry = setTimeout(() => removeTarget(target), life);
+    // Avisa (treme e pisca) um instante antes de o alvo sumir.
+    if (kind !== 'boss') target._warn = setTimeout(() => target.classList.add('expiring'), Math.max(0, life - 800));
     $('#targetLayer').appendChild(target);
   }
 
   function removeTarget(target) {
     clearTimeout(target._expiry);
+    clearTimeout(target._warn);
     target.remove();
   }
 
+  // Alvo atingido: fica preso em um casulo de teia e cai.
   function popTarget(target) {
     clearTimeout(target._expiry);
+    clearTimeout(target._warn);
+    target.classList.remove('expiring', 'spawning');
     target.classList.add('popped');
-    setTimeout(() => target.remove(), 220);
+    setTimeout(() => target.remove(), 520);
   }
 
   function clearTargets() {
@@ -404,6 +415,7 @@ const Game = (() => {
       Sfx.play('penalty');
       Controller.feedback('PENALTY');
       shake();
+      target.classList.add('oops');
       popTarget(target);
       updateHud();
       return;
@@ -416,6 +428,10 @@ const Game = (() => {
       target.querySelector('.boss-hp i').style.width = `${(target._hp / target._maxHp) * 100}%`;
       drawWeb(target);
       shake();
+      target.classList.remove('hit-flash');
+      void target.offsetWidth; // reinicia a animação
+      target.classList.add('hit-flash');
+      if (target._hp <= target._maxHp / 2) target.classList.add('rage');
       if (target._hp > 0) {
         award(25, c);
         Sfx.play('bosshit');
