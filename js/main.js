@@ -1,7 +1,5 @@
 // Ligação entre a interface (HTML) e os módulos. Também: modo quiosque e painel do operador.
 
-// Senha do painel do operador (evita que visitantes zerem o placar). Altere aqui.
-const OPERATOR_PIN = '2025';
 const IDLE_ATTRACT_SECONDS = 60;
 
 // ------------------------- NAVEGAÇÃO -------------------------
@@ -13,55 +11,47 @@ function showView(id) {
 
 $$('.tab').forEach(btn => btn.addEventListener('click', () => showView(btn.dataset.view)));
 
-// ------------------------- PERSONAGEM E DIFICULDADE -------------------------
+// ------------------------- PERSONAGEM -------------------------
 $$('.character-card').forEach(card => card.addEventListener('click', () => {
   $$('.character-card').forEach(c => c.classList.remove('selected'));
   card.classList.add('selected');
   Game.setCharacter(card.dataset.character, card.dataset.color);
 }));
 
-$$('.chip[data-difficulty]').forEach(chip => chip.addEventListener('click', () => {
-  $$('.chip[data-difficulty]').forEach(c => c.classList.remove('selected'));
-  chip.classList.add('selected');
-  Game.setDifficulty(chip.dataset.difficulty);
-  store.set('webHeroDifficulty', chip.dataset.difficulty);
-}));
-
-// ------------------------- INÍCIO DA MISSÃO -------------------------
+// ------------------------- INÍCIO, PARADA E CALIBRAÇÃO -------------------------
+// O jogo sempre começa fácil e a dificuldade sobe a cada fase (ver LEVELS em game.js).
+// O codinome só é pedido no final da partida.
 function startGame() {
-  const name = $('#playerName').value.trim().replace(/[<>]/g, '').slice(0, 16);
-  if (!name) {
-    toast('Digite seu codinome antes de começar.');
-    $('#playerName').focus();
-    return;
-  }
   if (!Controller.isReady()) {
-    toast('Conecte e calibre o disparador (ou use o modo demo) antes de iniciar.');
+    toast('Conecte e calibre o disparador antes de iniciar.');
     return;
   }
-  Game.setPlayer(name);
   ctl.pendingStart = true;
   showCalibrationUI();
   updateCalibrationUI();
   startCountdown();
 }
 
+// Para a partida e volta para a tela inicial. A pontuação da partida parada não é salva.
+function stopGame({ ask = true } = {}) {
+  if (Game.phase === 'idle') return false;
+  if (ask && !confirm('Parar o jogo e voltar ao início? A pontuação desta partida será perdida.')) return false;
+  Game.abort();
+  showView('gameView');
+  toast('Jogo parado. Voltando ao início.');
+  return true;
+}
+
+// Recalibra o sensor (não pode acontecer no meio de uma partida).
+function recalibrate() {
+  if (Game.isRunning() && !stopGame()) return;
+  Controller.startCalibration();
+}
+
 $('#startBtn').addEventListener('click', startGame);
 $('#connectBtn').addEventListener('click', () => Controller.connect());
-$('#demoBtn').addEventListener('click', () => Controller.toggleDemo());
-$('#shootBtn').addEventListener('click', () => Game.shootAtAim());
-
-// ------------------------- MIRA COM MOUSE (SÓ NO MODO DEMO) -------------------------
-const arenaEl = $('#arena');
-arenaEl.addEventListener('pointermove', event => { if (Controller.mode() === 'demo') Game.pointerAim(event); });
-arenaEl.addEventListener('pointerdown', event => {
-  if (Controller.mode() !== 'demo') return;
-  Game.pointerAim(event);
-  Game.shootAtAim();
-});
-arenaEl.addEventListener('pointerleave', () => {
-  if (Controller.mode() === 'demo') $('#crosshair').style.opacity = 0;
-});
+$('#recalibrateBtn').addEventListener('click', recalibrate);
+$('#stopBtn').addEventListener('click', () => stopGame());
 
 // ------------------------- SOM, TELA CHEIA E TELÃO -------------------------
 function refreshSoundButton() {
@@ -101,86 +91,153 @@ $('#rankingView').addEventListener('click', event => {
 // ------------------------- RANKING -------------------------
 $('#exportCsvBtn').addEventListener('click', () => Ranking.exportCsv());
 $('#exportJsonBtn').addEventListener('click', () => Ranking.exportJson());
-$('#clearRankingBtn').addEventListener('click', () => {
-  if (!askOperatorPin()) return;
-  if (confirm('Tem certeza que deseja apagar o ranking salvo neste navegador? Exporte um backup antes.')) {
-    Ranking.clear();
-    Ranking.render();
-    toast('Ranking local apagado.');
+$('#clearRankingBtn').addEventListener('click', async () => {
+  if (!confirm('Tem certeza que deseja APAGAR todo o ranking (navegador e arquivo vinculado)? Exporte um backup antes.')) return;
+  await Ranking.clear();
+  await Ranking.render();
+  toast('Ranking apagado.');
+});
+
+// Arquivo JSON do ranking: vincular na 1ª vez, autorizar nas próximas visitas.
+$('#linkFileBtn').addEventListener('click', () => Ranking.fileAction());
+$('#opLinkFile').addEventListener('click', () => Ranking.fileAction());
+document.addEventListener('rankingfile', () => Ranking.render());
+
+// O navegador pode pedir autorização de novo a cada visita. Aproveita o 1º clique na página.
+let authorizationTried = false;
+document.addEventListener('pointerdown', () => {
+  if (!authorizationTried && Ranking.fileState === 'needs-permission') {
+    authorizationTried = true;
+    Ranking.restore({ request: true });
   }
 });
 
-// ------------------------- PAINEL DO OPERADOR -------------------------
-let operatorUnlocked = false;
-
-function askOperatorPin() {
-  if (operatorUnlocked) return true;
-  const typed = prompt('Senha do operador:');
-  if (typed === null) return false;
-  if (typed === OPERATOR_PIN) { operatorUnlocked = true; return true; }
-  toast('Senha incorreta.');
-  return false;
-}
+// ------------------------- PAINEL DO OPERADOR (tecla O ou botão ⚙) -------------------------
+const operatorPanel = () => $('#operatorPanel');
+const isOperatorPanelOpen = () => operatorPanel().classList.contains('visible');
+let operatorTimer = null;
 
 function refreshOperatorStatus() {
-  const modes = { none: 'sem controle', hardware: 'controle físico', demo: 'modo demo' };
+  const connection = ctl.mode === 'hardware' ? 'controle conectado' : 'controle desconectado';
+  const phases = { idle: 'sem partida', intro: 'começando', playing: 'jogando', between: 'entre fases', over: 'tela final' };
   $('#opStatus').textContent =
-    `Modo: ${modes[ctl.mode]} · Estado: ${ctl.status} · Firmware: ${ctl.fw || '—'} · Partida: ${Game.phase}`;
+    `${connection} · sensor: ${ctl.status} · firmware: ${ctl.fw || '—'} · partida: ${phases[Game.phase] || Game.phase}`;
 }
 
 function openOperatorPanel() {
-  if (!askOperatorPin()) return;
   syncSensitivitySliders();
+  syncReach();
+  refreshMeasureText();
   refreshOperatorStatus();
-  $('#operatorPanel').classList.add('visible');
+  Ranking.render(); // atualiza o estado do arquivo de ranking
+  operatorPanel().classList.add('visible');
+  clearInterval(operatorTimer);
+  operatorTimer = setInterval(refreshOperatorStatus, 1000);
 }
-const closeOperatorPanel = () => $('#operatorPanel').classList.remove('visible');
+
+function closeOperatorPanel() {
+  operatorPanel().classList.remove('visible');
+  clearInterval(operatorTimer);
+  Controller.stopMeasure();
+}
 
 function syncSensitivitySliders() {
   $('#sensPitch').value = ctl.sens.pitch;
-  $('#sensRoll').value = ctl.sens.roll;
   $('#sensPitchValue').textContent = `${Number(ctl.sens.pitch).toFixed(0)}°`;
-  $('#sensRollValue').textContent = `${Number(ctl.sens.roll).toFixed(0)}°`;
 }
 
 function applySensitivity() {
   const pitch = Number($('#sensPitch').value);
-  const roll = Number($('#sensRoll').value);
   $('#sensPitchValue').textContent = `${pitch}°`;
-  $('#sensRollValue').textContent = `${roll}°`;
-  Controller.setSensitivity(pitch, roll);
+  Controller.setSensitivity(pitch);
 }
 
 $('#sensPitch').addEventListener('change', applySensitivity);
-$('#sensRoll').addEventListener('change', applySensitivity);
 document.addEventListener('sensitivity', syncSensitivitySliders);
 
+// ----- mão e alcance do pulso -----
+function syncReach() {
+  $('#reachLeft').value = ctl.reach.left;
+  $('#reachRight').value = ctl.reach.right;
+  $('#reachLeftValue').textContent = `${ctl.reach.left}°`;
+  $('#reachRightValue').textContent = `${ctl.reach.right}°`;
+}
+
+function syncHand() {
+  $$('.chip[data-hand]').forEach(chip => chip.classList.toggle('selected', chip.dataset.hand === ctl.hand));
+  Game.applyHand();
+}
+
+function applyReachSliders() {
+  Controller.setReach(Number($('#reachLeft').value), Number($('#reachRight').value));
+}
+
+function refreshMeasureText() {
+  const m = Controller.measure();
+  $('#opApplyMeasure').disabled = !m.active;
+  $('#opMeasure').textContent = m.active ? 'REINICIAR MEDIÇÃO' : 'MEDIR ALCANCE';
+  $('#opMeasureText').textContent = m.active
+    ? `Gire o pulso até o limite confortável para a esquerda e para a direita. Medido: esquerda ${(-m.min).toFixed(0)}° · direita ${m.max.toFixed(0)}°`
+    : 'Dica: use MEDIR ALCANCE para descobrir o giro confortável deste jogador.';
+}
+
+$$('.chip[data-hand]').forEach(chip => chip.addEventListener('click', () => {
+  Controller.setHand(chip.dataset.hand);
+  toast(chip.dataset.hand === 'right' ? 'Mão direita: personagem no canto direito.' : 'Mão esquerda: personagem no canto esquerdo.');
+}));
+$('#reachLeft').addEventListener('input', applyReachSliders);
+$('#reachRight').addEventListener('input', applyReachSliders);
+$('#opMeasure').addEventListener('click', () => {
+  if (!Controller.isReady()) { toast('Conecte e calibre o controle para medir o alcance.'); return; }
+  Controller.startMeasure();
+});
+$('#opApplyMeasure').addEventListener('click', () => { Controller.applyMeasure(); toast('Alcance atualizado com as medidas.'); });
+document.addEventListener('reach', syncReach);
+document.addEventListener('handchange', syncHand);
+document.addEventListener('measure', refreshMeasureText);
+
+// ----- botões do painel -----
 $('#opClose').addEventListener('click', closeOperatorPanel);
-$('#opRecalibrate').addEventListener('click', () => { closeOperatorPanel(); Controller.startCalibration(); });
-$('#opCenter').addEventListener('click', () => Controller.center());
-$('#opSkip').addEventListener('click', () => Game.skipLevel());
-$('#opAbort').addEventListener('click', () => { Game.abort(); closeOperatorPanel(); toast('Partida encerrada.'); });
+$('#opRecalibrate').addEventListener('click', () => { closeOperatorPanel(); recalibrate(); });
+$('#opCenter').addEventListener('click', () => {
+  if (ctl.mode !== 'hardware') { toast('Conecte o controle para centralizar a mira.'); return; }
+  Controller.center();
+});
+$('#opSkip').addEventListener('click', () => {
+  if (Game.phase !== 'playing') { toast('Só dá para pular a fase durante o jogo.'); return; }
+  Game.skipLevel();
+  toast('Fase pulada.');
+});
+$('#opAbort').addEventListener('click', () => {
+  if (Game.phase === 'idle') { toast('Não há partida em andamento.'); return; }
+  closeOperatorPanel();
+  stopGame({ ask: false });
+});
 $('#opCsv').addEventListener('click', () => Ranking.exportCsv());
 $('#opJson').addEventListener('click', () => Ranking.exportJson());
 $('#operatorBtn').addEventListener('click', openOperatorPanel);
+operatorPanel().addEventListener('click', event => { if (event.target === operatorPanel()) closeOperatorPanel(); });
 
 // ------------------------- ATALHOS DE TECLADO -------------------------
+// Sem atalho de disparo: o tiro só sai pelo botão do controle.
 document.addEventListener('keydown', event => {
-  const typing = event.target && (event.target.matches('input,textarea,select') || event.target.isContentEditable);
-
-  if (event.code === 'Space' && Game.isRunning() && !typing) {
-    event.preventDefault();
-    Game.shootAtAim();
-    return;
-  }
+  const target = event.target;
+  const typing = target instanceof Element && (target.matches('input,textarea,select') || target.isContentEditable);
   if (typing || event.ctrlKey || event.metaKey || event.altKey) return;
 
   switch (event.key.toLowerCase()) {
-    case 'c': event.preventDefault(); Controller.center(); break;
+    case 'c':
+      event.preventDefault();
+      if (ctl.mode === 'hardware') Controller.center();
+      break;
     case 'm': Sfx.toggle(); refreshSoundButton(); break;
     case 'f': toggleFullscreen(); break;
-    case 'o': openOperatorPanel(); break;
-    case 'escape': closeOperatorPanel(); break;
+    case 'o': isOperatorPanelOpen() ? closeOperatorPanel() : openOperatorPanel(); break;
+    case 'escape':
+      if (isOperatorPanelOpen()) closeOperatorPanel();
+      else if (document.body.classList.contains('board-mode')) exitBoardMode();
+      else stopGame();
+      break;
   }
 });
 
@@ -200,7 +257,7 @@ function registerActivity() {
 setInterval(() => {
   const idleSeconds = (Date.now() - lastActivity) / 1000;
   const onSetup = $('#gameView').classList.contains('active-view') && !$('#setupPanel').classList.contains('hidden');
-  const busy = Game.isRunning() || ctl.pendingStart || isCalibrationUIVisible() || $('#operatorPanel').classList.contains('visible');
+  const busy = Game.isRunning() || ctl.pendingStart || isCalibrationUIVisible() || isOperatorPanelOpen();
   if (idleSeconds >= IDLE_ATTRACT_SECONDS && onSetup && !busy && Ranking.count() > 0) {
     document.body.classList.add('attract');
     enterBoardMode({ fullscreen: false });
@@ -211,11 +268,9 @@ setInterval(() => {
 // ------------------------- INICIALIZAÇÃO -------------------------
 installCalibrationUI();
 Ranking.render();
+Ranking.restore();
+syncHand();
+syncReach();
 refreshSoundButton();
-
-const savedDifficulty = store.get('webHeroDifficulty', 'normal');
-const savedChip = $(`.chip[data-difficulty="${savedDifficulty}"]`);
-if (savedChip) savedChip.click();
-
-if (new URLSearchParams(location.search).has('demo')) Controller.enterDemo();
-else Controller.autoReconnect();
+Controller.refreshRecalibrateButton();
+Controller.autoReconnect();

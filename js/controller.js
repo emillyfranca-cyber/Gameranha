@@ -1,72 +1,65 @@
-// Comunicação com o controle (ESP32 via Web Serial) e modo demonstração.
+// Comunicação com o controle (ESP32 via Web Serial).
 //
 // Protocolo ESP32 -> navegador (uma linha por mensagem):
-//   HELLO:FW2            versão do firmware
+//   HELLO:FW4            versão do firmware
 //   SENSOR_OK / SENSOR_ERROR / CALIBRATION_REQUIRED / CALIBRATING / CALIBRATION_ATTEMPT:n
 //   CALIBRATION_RETRY / CALIBRATION_OK / CALIBRATION_ERROR / READY / CENTER_OK / CENTER_ERROR
 //   I2C_RECOVERY / SENSOR_RECOVERED
 //   AIM:x,y              mira (0..1000)
-//   SHOOT                disparo (botão ou movimento brusco)
-//   SENS_OK:p,r          sensibilidade atual (graus de alcance vertical/horizontal)
+//   SHOOT                disparo (somente ao apertar o botão do controle)
+//   SENS_OK:p,r          faixa atual em graus (vertical, horizontal). O AIM horizontal é
+//                        500 + giro/faixa*500; o site converte o giro para a tela (ver mapHorizontal)
 // Protocolo navegador -> ESP32:
 //   STATUS, CALIBRATE, CENTER, SENS:p,r
 //   HIT, MISS, PENALTY, LEVEL   (feedback sonoro e de vibração no controle)
 
 const ctl = {
-  mode: 'none',                 // none | hardware | demo
+  mode: 'none',                 // none | hardware
   port: null, reader: null, writer: null, buffer: '', generation: 0,
   status: 'disconnected',       // disconnected | waiting | calibration_required | calibrating | retry | calibrated | ready | error
   attempt: 0,
   pendingStart: false, countdownRunning: false, calibrationRequested: false, centerPending: false,
   fw: null,
-  sens: { pitch: 22, roll: 35 },
+  sens: { pitch: 22, roll: 90 },
+  // Mão do jogador e alcance CONFORTÁVEL do giro do pulso (graus a partir da pose calibrada).
+  // O punho gira mais para um lado do que para o outro; cada lado é esticado até a borda da tela.
+  hand: 'right',                // right | left
+  reach: { left: 45, right: 20 },
+  rel: 0,                       // giro atual do pulso em graus (+ = direita)
   disconnectHandler: null
 };
+
+// O firmware usa uma faixa larga de roll (±90°); o site converte o ângulo para a tela.
+const FW_ROLL_RANGE = 90;
+const DEFAULT_REACH = { right: { left: 45, right: 20 }, left: { left: 20, right: 45 } };
 
 const Controller = (() => {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
   // ------------------------- INTERFACE -------------------------
-  function setConnectionUI({ connected, text, connectLabel, connectDisabled, startLabel, startDisabled, demoLabel }) {
+  function setConnectionUI({ connected, text, connectLabel, connectDisabled, startLabel, startDisabled }) {
     $('#connectionDot').classList.toggle('connected', connected);
     $('#connectionText').textContent = text;
     $('#connectBtn').textContent = connectLabel;
     $('#connectBtn').disabled = connectDisabled;
     $('#startBtn').innerHTML = `${startLabel} <span>↗</span>`;
     $('#startBtn').disabled = startDisabled;
-    if (demoLabel) $('#demoBtn').textContent = demoLabel;
+    refreshRecalibrateButton();
+  }
+
+  // O botão RECALIBRAR só vale com o controle conectado e fora de uma calibração em andamento.
+  function refreshRecalibrateButton() {
+    const button = $('#recalibrateBtn');
+    if (!button) return;
+    button.disabled = !(ctl.mode === 'hardware' && ctl.writer && ctl.status !== 'calibrating' && ctl.status !== 'waiting');
   }
 
   const DISCONNECTED_UI = {
     connected: false, text: 'DISPARADOR NÃO CONECTADO',
     connectLabel: 'CONECTAR DISPARADOR', connectDisabled: false,
-    startLabel: 'AGUARDANDO CONTROLE', startDisabled: true,
-    demoLabel: 'JOGAR SEM CONTROLE (DEMO)'
+    startLabel: 'AGUARDANDO CONTROLE', startDisabled: true
   };
-
-  // ------------------------- MODO DEMO -------------------------
-  function enterDemo() {
-    if (ctl.port) { toast('Desconecte o controle antes de usar o modo demo.'); return; }
-    ctl.mode = 'demo';
-    ctl.status = 'ready';
-    setConnectionUI({
-      connected: true, text: 'MODO DEMO · MOUSE OU TOQUE',
-      connectLabel: 'CONECTAR DISPARADOR', connectDisabled: true,
-      startLabel: 'INICIAR MISSÃO', startDisabled: false,
-      demoLabel: 'USAR CONTROLE FÍSICO'
-    });
-    toast('Modo demo ativado: mire com o mouse e clique para disparar.');
-  }
-
-  function leaveDemo() {
-    ctl.mode = 'none';
-    ctl.status = 'disconnected';
-    ctl.pendingStart = false;
-    setConnectionUI(DISCONNECTED_UI);
-  }
-
-  const toggleDemo = () => (ctl.mode === 'demo' ? leaveDemo() : enterDemo());
 
   // ------------------------- ENVIO -------------------------
   async function send(command, quiet = false) {
@@ -98,12 +91,14 @@ const Controller = (() => {
     ctl.calibrationRequested = true;
     ctl.status = 'calibrating';
     ctl.attempt = 0;
+    refreshRecalibrateButton();
     showCalibrationUI();
     updateCalibrationUI();
     if (!(await send('CALIBRATE\n'))) {
       ctl.status = 'error';
       ctl.calibrationRequested = false;
       updateCalibrationUI();
+      refreshRecalibrateButton();
     }
   }
 
@@ -113,17 +108,71 @@ const Controller = (() => {
     if (await send('CENTER\n')) toast('Solicitando centralização da mira...');
   }
 
-  function setSensitivity(pitch, roll) {
-    ctl.sens = { pitch, roll };
-    store.set('webHeroSens', ctl.sens);
-    send(`SENS:${pitch.toFixed(1)},${roll.toFixed(1)}\n`, true);
+  // Sensibilidade vertical. O horizontal agora é definido por reach (alcance de cada lado).
+  function setSensitivity(pitch) {
+    ctl.sens = { pitch, roll: FW_ROLL_RANGE };
+    store.set('gameranhaSens', ctl.sens);
+    send(`SENS:${pitch.toFixed(1)},${FW_ROLL_RANGE.toFixed(1)}\n`, true);
+  }
+
+  // ------------------------- MÃO, ALCANCE E MEDIÇÃO -------------------------
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const measure = { active: false, min: 0, max: 0 };
+
+  function setReach(left, right) {
+    ctl.reach = { left: clamp(Math.round(left), 8, 85), right: clamp(Math.round(right), 8, 85) };
+    store.set('gameranhaReach', ctl.reach);
+    document.dispatchEvent(new CustomEvent('reach'));
+  }
+
+  // Trocar de mão espelha o alcance (o lado fácil passa a ser o outro).
+  function setHand(hand) {
+    if (hand !== 'right' && hand !== 'left') return;
+    if (hand !== ctl.hand) setReach(ctl.reach.right, ctl.reach.left);
+    ctl.hand = hand;
+    store.set('gameranhaHand', hand);
+    document.dispatchEvent(new CustomEvent('handchange'));
+  }
+
+  function startMeasure() {
+    Object.assign(measure, { active: true, min: 0, max: 0 });
+    document.dispatchEvent(new CustomEvent('measure'));
+  }
+
+  function stopMeasure() {
+    if (!measure.active) return;
+    measure.active = false;
+    document.dispatchEvent(new CustomEvent('measure'));
+  }
+
+  // Usa o maior giro medido para cada lado como alcance (ignora lado com menos de 8°).
+  function applyMeasure() {
+    if (!measure.active) return;
+    const left = -measure.min >= 8 ? -measure.min : ctl.reach.left;
+    const right = measure.max >= 8 ? measure.max : ctl.reach.right;
+    setReach(left, right);
+    measure.active = false;
+    document.dispatchEvent(new CustomEvent('measure'));
+  }
+
+  // Converte o x bruto do firmware (0..1000, 500 = pose calibrada) em x de tela (0..1000).
+  // Pose calibrada = ponto onde o alcance da esquerda termina e o da direita começa.
+  function mapHorizontal(rawX) {
+    const rel = ((rawX - 500) / 500) * ctl.sens.roll;   // graus; + = girou para a direita
+    ctl.rel = rel;
+    if (measure.active) {
+      measure.min = Math.min(measure.min, rel);
+      measure.max = Math.max(measure.max, rel);
+      document.dispatchEvent(new CustomEvent('measure'));
+    }
+    const { left, right } = ctl.reach;
+    return clamp(((rel + left) / (left + right)) * 1000, 0, 1000);
   }
 
   // ------------------------- CONEXÃO -------------------------
   async function connect(knownPort = null) {
     if (!('serial' in navigator)) { toast('Web Serial não disponível. Use Chrome ou Edge atualizado.'); return; }
     if (ctl.port) { toast('Já existe um controle conectado.'); return; }
-    if (ctl.mode === 'demo') { toast('Saia do modo demo para conectar o controle.'); return; }
 
     let port = knownPort;
     try {
@@ -144,8 +193,8 @@ const Controller = (() => {
         connectLabel: 'DISPARADOR CONECTADO', connectDisabled: true,
         startLabel: 'AGUARDANDO CALIBRAÇÃO', startDisabled: true
       });
-      $('#demoBtn').disabled = true;
       ctl.status = 'waiting';
+      refreshRecalibrateButton();
       ctl.attempt = 0;
       ctl.calibrationRequested = false;
       showCalibrationUI();
@@ -158,7 +207,7 @@ const Controller = (() => {
 
       await sleep(250);
       if (ctl.port === port) await send('STATUS\n', true);
-      send(`SENS:${ctl.sens.pitch.toFixed(1)},${ctl.sens.roll.toFixed(1)}\n`, true);
+      send(`SENS:${ctl.sens.pitch.toFixed(1)},${FW_ROLL_RANGE.toFixed(1)}\n`, true);
 
       setTimeout(() => {
         if (ctl.port === port && !ctl.fw) toast('Firmware desatualizado: grave a versão nova no ESP32.');
@@ -170,7 +219,6 @@ const Controller = (() => {
       ctl.mode = 'none';
       ctl.status = 'disconnected';
       setConnectionUI(DISCONNECTED_UI);
-      $('#demoBtn').disabled = false;
       hideCalibrationUI();
       if (error?.name !== 'NotFoundError') toast('Não foi possível conectar. Confira a placa e a permissão USB.');
     }
@@ -201,7 +249,6 @@ const Controller = (() => {
     ctl.generation++;
     Game.abort();
     setConnectionUI(DISCONNECTED_UI);
-    $('#demoBtn').disabled = false;
     hideCalibrationUI();
     toast('Disparador desconectado. Conecte novamente para continuar.');
   }
@@ -258,14 +305,14 @@ const Controller = (() => {
     toast(message);
   }
 
-  function handleLine(rawLine) {
+  function processLine(rawLine) {
     const line = rawLine.trim().toUpperCase();
     if (!line) return;
 
     if (line === 'SHOOT') { Game.shootAtAim({ silent: true }); return; }
     if (line.startsWith('AIM:')) {
       const [x, y] = line.slice(4).split(',').map(Number);
-      if (Number.isFinite(x) && Number.isFinite(y)) Game.updateAim(x, y);
+      if (Number.isFinite(x) && Number.isFinite(y)) Game.updateAim(mapHorizontal(x), y);
       return;
     }
     if (line.startsWith('HELLO:')) { ctl.fw = line.slice(6); return; }
@@ -335,13 +382,23 @@ const Controller = (() => {
     }
   }
 
+  // Processa uma linha recebida e atualiza o botão RECALIBRAR conforme o novo estado.
+  function handleLine(rawLine) {
+    processLine(rawLine);
+    refreshRecalibrateButton();
+  }
+
   return {
     mode: () => ctl.mode,
-    isReady: () => ctl.mode === 'demo' || (ctl.mode === 'hardware' && !!ctl.writer && ctl.status === 'ready'),
-    connect, toggleDemo, enterDemo, leaveDemo,
-    send, feedback, startCalibration, center, setSensitivity, autoReconnect
+    isReady: () => ctl.mode === 'hardware' && !!ctl.writer && ctl.status === 'ready',
+    connect, send, feedback, startCalibration, center, setSensitivity, autoReconnect,
+    setHand, setReach, startMeasure, stopMeasure, applyMeasure,
+    measure: () => ({ ...measure }),
+    mapHorizontal, handleLine, refreshRecalibrateButton
   };
 })();
 
-// Restaura a sensibilidade salva neste navegador.
-ctl.sens = store.get('webHeroSens', ctl.sens);
+// Restaura as preferências salvas neste navegador.
+ctl.sens = { pitch: store.get('gameranhaSens', ctl.sens).pitch || 22, roll: FW_ROLL_RANGE };
+ctl.hand = store.get('gameranhaHand', 'right') === 'left' ? 'left' : 'right';
+ctl.reach = store.get('gameranhaReach', DEFAULT_REACH[ctl.hand]);

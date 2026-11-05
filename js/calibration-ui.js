@@ -36,7 +36,7 @@ function installCalibrationUI() {
   overlay.id = 'calibrationOverlay';
   overlay.innerHTML = `
     <div class="calibration-card">
-      <div class="calibration-eyebrow">WEB HERO · PREPARAÇÃO</div>
+      <div class="calibration-eyebrow">GAMERANHA · PREPARAÇÃO</div>
       <h2 class="calibration-title">Prepare seu disparador</h2>
       <p class="calibration-description" id="calibrationDescription">Antes da missão, precisamos calibrar o sensor para que a mira acompanhe corretamente os movimentos do seu pulso.</p>
       <div class="calibration-illustration"><span id="calibrationIcon">⌚</span></div>
@@ -80,7 +80,7 @@ function updateCalibrationUI() {
   text.classList.remove('calibration-error');
   retry.style.display = 'none';
   countdown.style.display = 'none';
-  $('#calibrationSteps').style.display = ctl.mode === 'demo' ? 'none' : 'grid';
+  $('#calibrationSteps').style.display = 'grid';
 
   const attempt = ctl.attempt;
   switch (ctl.status) {
@@ -111,8 +111,8 @@ function updateCalibrationUI() {
       icon.textContent = '✓'; progress.style.width = '100%';
       break;
     case 'ready':
-      text.textContent = ctl.mode === 'demo' ? 'Modo demonstração' : 'Controle pronto!';
-      desc.textContent = ctl.mode === 'demo' ? 'Use o mouse ou o toque para mirar e clicar para disparar.' : 'A calibração terminou. A missão está liberada.';
+      text.textContent = 'Controle pronto!';
+      desc.textContent = 'A calibração terminou. A missão está liberada.';
       icon.textContent = '🕷️'; progress.style.width = '100%';
       break;
     case 'error':
@@ -141,7 +141,7 @@ async function startCountdown() {
   description.textContent = 'Posicione sua mira. A missão está prestes a começar!';
   countdown.style.display = 'block';
 
-  const from = ctl.mode === 'demo' ? 3 : 5;
+  const from = 5;
   for (let i = from; i >= 1; i--) {
     if (!stillValid()) return abort();
     countdown.textContent = i;

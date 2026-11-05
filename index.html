@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#090d1b">
-  <title>WEB HERO | Mundo SENAI</title>
+  <title>GAMERANHA | Mundo SENAI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -17,9 +17,9 @@
   <div class="senai-grid-glow"></div>
 
   <header class="topbar">
-    <a class="brand" href="#" aria-label="Web Hero início">
+    <a class="brand" href="#" aria-label="Gameranha início">
       <span class="brand-mark">✦</span>
-      <span>WEB<span class="accent">HERO</span>
+      <span>GAME<span class="accent">RANHA</span>
         <small>MUNDO SENAI · DESENVOLVIMENTO DE SISTEMAS</small>
       </span>
     </a>
@@ -72,14 +72,6 @@
           <span class="mini-icon">✦</span>
         </div>
 
-        <label class="input-label" for="playerName">SEU CODINOME</label>
-        <input
-          id="playerName"
-          maxlength="16"
-          placeholder="Ex.: AranhaAzul"
-          autocomplete="off"
-        >
-
         <div class="character-grid">
           <button
             class="character-card selected"
@@ -124,14 +116,13 @@
           </button>
         </div>
 
-        <span class="input-label">DIFICULDADE</span>
-        <div class="difficulty-row" role="group" aria-label="Dificuldade">
-          <button class="chip" type="button" data-difficulty="easy">FÁCIL</button>
-          <button class="chip selected" type="button" data-difficulty="normal">NORMAL</button>
-          <button class="chip" type="button" data-difficulty="hard">DIFÍCIL</button>
+        <!-- CONEXÃO ANTES DO INÍCIO DA MISSÃO -->
+        <span class="input-label">MÃO DO JOGADOR (define o lado do personagem e o alcance do pulso)</span>
+        <div class="difficulty-row" role="group" aria-label="Mão do jogador">
+          <button class="chip selected" type="button" data-hand="right">DIREITA</button>
+          <button class="chip" type="button" data-hand="left">ESQUERDA</button>
         </div>
 
-        <!-- CONEXÃO ANTES DO INÍCIO DA MISSÃO -->
         <div class="connection-status setup-connection">
           <span id="connectionDot"></span>
 
@@ -151,16 +142,17 @@
           </button>
 
           <button
-            id="demoBtn"
+            id="recalibrateBtn"
             class="secondary-btn"
             type="button"
+            disabled
           >
-            JOGAR SEM CONTROLE (DEMO)
+            RECALIBRAR
           </button>
         </div>
 
         <div class="setup-footer">
-          <span>3 FASES · 30 SEGUNDOS POR FASE</span>
+          <span>3 FASES · COMEÇA FÁCIL E FICA MAIS DIFÍCIL A CADA FASE</span>
 
           <button id="startBtn" class="primary-btn" disabled>
             AGUARDANDO CONTROLE <span>↗</span>
@@ -245,14 +237,14 @@
 
         <div class="game-controls">
           <div class="control-actions">
-            <button id="shootBtn" class="primary-btn">
-              DISPARAR TEIA <span>⌁</span>
+            <button id="stopBtn" class="secondary-btn" type="button">
+              ■ PARAR E VOLTAR AO INÍCIO
             </button>
           </div>
         </div>
 
         <div class="game-note">
-          Mire com o movimento do pulso e aperte o botão do disparador
+          Mire com o movimento do pulso e aperte o botão do controle
           para lançar a teia. Acertos seguidos aumentam o combo;
           cuidado com os civis!
         </div>
@@ -271,17 +263,18 @@
           <span class="gradient-text">LENDAS.</span>
         </h1>
 
-        <p>As melhores pontuações salvas neste computador.</p>
+        <p>As melhores pontuações da missão.</p>
       </div>
 
       <section class="panel ranking-panel">
         <div class="section-heading">
           <div>
             <span class="step-label">TOP JOGADORES</span>
-            <h2>Ranking local</h2>
+            <h2>Ranking</h2>
           </div>
 
           <div class="ranking-actions">
+            <button id="linkFileBtn" class="text-btn" type="button">VINCULAR ARQUIVO JSON</button>
             <button id="boardBtn" class="text-btn" type="button">MODO TELÃO</button>
             <button id="exportCsvBtn" class="text-btn" type="button">EXPORTAR CSV</button>
             <button id="exportJsonBtn" class="text-btn" type="button">BACKUP JSON</button>
@@ -291,10 +284,7 @@
 
         <div id="rankingList"></div>
 
-        <p class="local-warning">
-          Este ranking fica salvo neste navegador e computador.
-          Use EXPORTAR CSV ou BACKUP JSON para guardar os resultados.
-        </p>
+        <p id="rankingSource" class="local-warning"></p>
       </section>
     </section>
 
@@ -319,7 +309,8 @@
           <div>
             <h3>Escolha seu herói</h3>
             <p>
-              Digite um codinome e selecione uma das opções disponíveis.
+              Selecione uma das opções disponíveis. O codinome é pedido só no
+              final da missão, para entrar no ranking.
             </p>
           </div>
         </div>
@@ -340,8 +331,9 @@
           <div>
             <h3>Capture os bandidos</h3>
             <p>
-              Mire movimentando o pulso e aperte o botão para disparar a teia
-              nos criminosos. Os dourados valem 50 pontos, o relógio dá +3s e
+              Mire girando e inclinando o pulso e <strong>aperte o botão do
+              controle</strong> para disparar a teia nos criminosos
+              (mexer a mão sozinho não atira). Os dourados valem 50 pontos, o relógio dá +3s e
               acertos seguidos formam combos (x2, x3, x4).
               <strong>Não acerte os civis</strong>: eles tiram pontos e zeram o combo!
             </p>
@@ -353,8 +345,9 @@
           <div>
             <h3>Supere as três fases</h3>
             <p>
-              Você tem 30 segundos por fase.
-              Os alvos ficam mais rápidos a cada nível e, na última fase,
+              Você tem 30 segundos por fase. A missão começa fácil e a
+              dificuldade aumenta a cada fase: os alvos ficam mais rápidos,
+              duram menos e aparecem em maior número. Na última fase,
               um chefe aparece e precisa de vários acertos.
             </p>
           </div>
@@ -373,7 +366,7 @@
   </main>
 
   <footer>
-    <span>WEB HERO <b>×</b> MUNDO SENAI</span>
+    <span>GAMERANHA <b>×</b> MUNDO SENAI</span>
     <span>UM PROJETO DE DESENVOLVIMENTO DE SISTEMAS</span>
   </footer>
 
@@ -394,22 +387,34 @@
         <label class="op-slider">Alcance vertical (menor = mais sensível) <b id="sensPitchValue">22°</b>
           <input id="sensPitch" type="range" min="10" max="40" step="1" value="22">
         </label>
-        <label class="op-slider">Alcance horizontal (menor = mais sensível) <b id="sensRollValue">35°</b>
-          <input id="sensRoll" type="range" min="15" max="60" step="1" value="35">
+        <label class="op-slider">Giro do pulso para a ESQUERDA até a borda <b id="reachLeftValue">45°</b>
+          <input id="reachLeft" type="range" min="8" max="85" step="1" value="45">
         </label>
+        <label class="op-slider">Giro do pulso para a DIREITA até a borda <b id="reachRightValue">20°</b>
+          <input id="reachRight" type="range" min="8" max="85" step="1" value="20">
+        </label>
+        <div class="op-measure">
+          <p id="opMeasureText" class="op-status">Dica: use MEDIR ALCANCE para descobrir o giro confortável deste jogador.</p>
+          <div class="op-buttons">
+            <button id="opMeasure" class="secondary-btn" type="button">MEDIR ALCANCE</button>
+            <button id="opApplyMeasure" class="secondary-btn" type="button" disabled>APLICAR MEDIDAS</button>
+          </div>
+        </div>
       </div>
 
       <div class="op-group">
         <span class="input-label">PARTIDA</span>
         <div class="op-buttons">
           <button id="opSkip" class="secondary-btn" type="button">PULAR FASE</button>
-          <button id="opAbort" class="secondary-btn" type="button">ENCERRAR PARTIDA</button>
+          <button id="opAbort" class="secondary-btn" type="button">PARAR PARTIDA E VOLTAR AO INÍCIO</button>
         </div>
       </div>
 
       <div class="op-group">
         <span class="input-label">RANKING</span>
+        <p id="opFileStatus" class="op-status"></p>
         <div class="op-buttons">
+          <button id="opLinkFile" class="secondary-btn" type="button">VINCULAR ARQUIVO JSON</button>
           <button id="opCsv" class="secondary-btn" type="button">EXPORTAR CSV</button>
           <button id="opJson" class="secondary-btn" type="button">BACKUP JSON</button>
         </div>
