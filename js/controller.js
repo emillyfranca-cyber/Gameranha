@@ -7,7 +7,8 @@
 //   I2C_RECOVERY / SENSOR_RECOVERED
 //   AIM:x,y              mira (0..1000)
 //   SHOOT                disparo (botão ou movimento brusco)
-//   SENS_OK:p,r          sensibilidade atual (graus de alcance vertical/horizontal)
+//   SENS_OK:p,r          faixa atual em graus (vertical, horizontal). O AIM horizontal é
+//                        500 + giro/faixa*500; o site converte o giro para a tela (ver mapHorizontal)
 // Protocolo navegador -> ESP32:
 //   STATUS, CALIBRATE, CENTER, SENS:p,r
 //   HIT, MISS, PENALTY, LEVEL   (feedback sonoro e de vibração no controle)
@@ -19,9 +20,18 @@ const ctl = {
   attempt: 0,
   pendingStart: false, countdownRunning: false, calibrationRequested: false, centerPending: false,
   fw: null,
-  sens: { pitch: 22, roll: 35 },
+  sens: { pitch: 22, roll: 90 },
+  // Mão do jogador e alcance CONFORTÁVEL do giro do pulso (graus a partir da pose calibrada).
+  // O punho gira mais para um lado do que para o outro; cada lado é esticado até a borda da tela.
+  hand: 'right',                // right | left
+  reach: { left: 45, right: 20 },
+  rel: 0,                       // giro atual do pulso em graus (+ = direita)
   disconnectHandler: null
 };
+
+// O firmware usa uma faixa larga de roll (±90°); o site converte o ângulo para a tela.
+const FW_ROLL_RANGE = 90;
+const DEFAULT_REACH = { right: { left: 45, right: 20 }, left: { left: 20, right: 45 } };
 
 const Controller = (() => {
   const encoder = new TextEncoder();
@@ -113,10 +123,65 @@ const Controller = (() => {
     if (await send('CENTER\n')) toast('Solicitando centralização da mira...');
   }
 
-  function setSensitivity(pitch, roll) {
-    ctl.sens = { pitch, roll };
+  // Sensibilidade vertical. O horizontal agora é definido por reach (alcance de cada lado).
+  function setSensitivity(pitch) {
+    ctl.sens = { pitch, roll: FW_ROLL_RANGE };
     store.set('webHeroSens', ctl.sens);
-    send(`SENS:${pitch.toFixed(1)},${roll.toFixed(1)}\n`, true);
+    send(`SENS:${pitch.toFixed(1)},${FW_ROLL_RANGE.toFixed(1)}\n`, true);
+  }
+
+  // ------------------------- MÃO, ALCANCE E MEDIÇÃO -------------------------
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const measure = { active: false, min: 0, max: 0 };
+
+  function setReach(left, right) {
+    ctl.reach = { left: clamp(Math.round(left), 8, 85), right: clamp(Math.round(right), 8, 85) };
+    store.set('webHeroReach', ctl.reach);
+    document.dispatchEvent(new CustomEvent('reach'));
+  }
+
+  // Trocar de mão espelha o alcance (o lado fácil passa a ser o outro).
+  function setHand(hand) {
+    if (hand !== 'right' && hand !== 'left') return;
+    if (hand !== ctl.hand) setReach(ctl.reach.right, ctl.reach.left);
+    ctl.hand = hand;
+    store.set('webHeroHand', hand);
+    document.dispatchEvent(new CustomEvent('handchange'));
+  }
+
+  function startMeasure() {
+    Object.assign(measure, { active: true, min: 0, max: 0 });
+    document.dispatchEvent(new CustomEvent('measure'));
+  }
+
+  function stopMeasure() {
+    if (!measure.active) return;
+    measure.active = false;
+    document.dispatchEvent(new CustomEvent('measure'));
+  }
+
+  // Usa o maior giro medido para cada lado como alcance (ignora lado com menos de 8°).
+  function applyMeasure() {
+    if (!measure.active) return;
+    const left = -measure.min >= 8 ? -measure.min : ctl.reach.left;
+    const right = measure.max >= 8 ? measure.max : ctl.reach.right;
+    setReach(left, right);
+    measure.active = false;
+    document.dispatchEvent(new CustomEvent('measure'));
+  }
+
+  // Converte o x bruto do firmware (0..1000, 500 = pose calibrada) em x de tela (0..1000).
+  // Pose calibrada = ponto onde o alcance da esquerda termina e o da direita começa.
+  function mapHorizontal(rawX) {
+    const rel = ((rawX - 500) / 500) * ctl.sens.roll;   // graus; + = girou para a direita
+    ctl.rel = rel;
+    if (measure.active) {
+      measure.min = Math.min(measure.min, rel);
+      measure.max = Math.max(measure.max, rel);
+      document.dispatchEvent(new CustomEvent('measure'));
+    }
+    const { left, right } = ctl.reach;
+    return clamp(((rel + left) / (left + right)) * 1000, 0, 1000);
   }
 
   // ------------------------- CONEXÃO -------------------------
@@ -158,7 +223,7 @@ const Controller = (() => {
 
       await sleep(250);
       if (ctl.port === port) await send('STATUS\n', true);
-      send(`SENS:${ctl.sens.pitch.toFixed(1)},${ctl.sens.roll.toFixed(1)}\n`, true);
+      send(`SENS:${ctl.sens.pitch.toFixed(1)},${FW_ROLL_RANGE.toFixed(1)}\n`, true);
 
       setTimeout(() => {
         if (ctl.port === port && !ctl.fw) toast('Firmware desatualizado: grave a versão nova no ESP32.');
@@ -265,7 +330,7 @@ const Controller = (() => {
     if (line === 'SHOOT') { Game.shootAtAim({ silent: true }); return; }
     if (line.startsWith('AIM:')) {
       const [x, y] = line.slice(4).split(',').map(Number);
-      if (Number.isFinite(x) && Number.isFinite(y)) Game.updateAim(x, y);
+      if (Number.isFinite(x) && Number.isFinite(y)) Game.updateAim(mapHorizontal(x), y);
       return;
     }
     if (line.startsWith('HELLO:')) { ctl.fw = line.slice(6); return; }
@@ -339,9 +404,14 @@ const Controller = (() => {
     mode: () => ctl.mode,
     isReady: () => ctl.mode === 'demo' || (ctl.mode === 'hardware' && !!ctl.writer && ctl.status === 'ready'),
     connect, toggleDemo, enterDemo, leaveDemo,
-    send, feedback, startCalibration, center, setSensitivity, autoReconnect
+    send, feedback, startCalibration, center, setSensitivity, autoReconnect,
+    setHand, setReach, startMeasure, stopMeasure, applyMeasure,
+    measure: () => ({ ...measure }),
+    mapHorizontal
   };
 })();
 
-// Restaura a sensibilidade salva neste navegador.
-ctl.sens = store.get('webHeroSens', ctl.sens);
+// Restaura as preferências salvas neste navegador.
+ctl.sens = { pitch: store.get('webHeroSens', ctl.sens).pitch || 22, roll: FW_ROLL_RANGE };
+ctl.hand = store.get('webHeroHand', 'right') === 'left' ? 'left' : 'right';
+ctl.reach = store.get('webHeroReach', DEFAULT_REACH[ctl.hand]);

@@ -77,9 +77,18 @@ Com o controle sem calibrar, **segurar o botão por 1 s** inicia a calibração.
 A mira usa **girar/inclinar o pulso** (roll e pitch, que não derivam). Apontar o braço para os lados
 não move a mira, pois o MPU6050 não tem bússola.
 
+### Mão do jogador e alcance do pulso
+O punho gira bem mais para um lado do que para o outro. Por isso a mira **não é centralizada**: a pose
+calibrada fica onde o alcance de um lado termina e o do outro começa, e cada lado é esticado até a borda da tela.
+- Na tela inicial, escolha **MÃO: DIREITA ou ESQUERDA**. O personagem fica no canto desse lado
+  e o alcance é espelhado. O padrão (mão direita) é 45° para a esquerda e 20° para a direita.
+- No painel do operador (tecla `O`), ajuste o giro até a borda para cada lado ou use **MEDIR ALCANCE**:
+  o jogador gira o pulso até o limite confortável para os dois lados e **APLICAR MEDIDAS** grava os valores.
+- O firmware (FW4) envia o giro numa faixa larga (±90°) e o site converte para a tela.
+
 ### Gravar o firmware
 Arduino IDE → placa **ESP32 Dev Module** → abra `esp32/Gameranha_ESP32/Gameranha_ESP32.ino` → Upload.
-O firmware se identifica com `HELLO:FW3`; o site avisa se a versão estiver desatualizada.
+O firmware se identifica com `HELLO:FW4`; o site avisa se a versão estiver desatualizada.
 
 ## Estrutura do projeto
 ```

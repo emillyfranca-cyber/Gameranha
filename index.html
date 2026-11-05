@@ -117,6 +117,12 @@
         </div>
 
         <!-- CONEXÃO ANTES DO INÍCIO DA MISSÃO -->
+        <span class="input-label">MÃO DO JOGADOR (define o lado do personagem e o alcance do pulso)</span>
+        <div class="difficulty-row" role="group" aria-label="Mão do jogador">
+          <button class="chip selected" type="button" data-hand="right">DIREITA</button>
+          <button class="chip" type="button" data-hand="left">ESQUERDA</button>
+        </div>
+
         <div class="connection-status setup-connection">
           <span id="connectionDot"></span>
 
@@ -380,9 +386,19 @@
         <label class="op-slider">Alcance vertical (menor = mais sensível) <b id="sensPitchValue">22°</b>
           <input id="sensPitch" type="range" min="10" max="40" step="1" value="22">
         </label>
-        <label class="op-slider">Alcance horizontal (menor = mais sensível) <b id="sensRollValue">35°</b>
-          <input id="sensRoll" type="range" min="15" max="60" step="1" value="35">
+        <label class="op-slider">Giro do pulso para a ESQUERDA até a borda <b id="reachLeftValue">45°</b>
+          <input id="reachLeft" type="range" min="8" max="85" step="1" value="45">
         </label>
+        <label class="op-slider">Giro do pulso para a DIREITA até a borda <b id="reachRightValue">20°</b>
+          <input id="reachRight" type="range" min="8" max="85" step="1" value="20">
+        </label>
+        <div class="op-measure">
+          <p id="opMeasureText" class="op-status">Dica: use MEDIR ALCANCE para descobrir o giro confortável deste jogador.</p>
+          <div class="op-buttons">
+            <button id="opMeasure" class="secondary-btn" type="button">MEDIR ALCANCE</button>
+            <button id="opApplyMeasure" class="secondary-btn" type="button" disabled>APLICAR MEDIDAS</button>
+          </div>
+        </div>
       </div>
 
       <div class="op-group">

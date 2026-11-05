@@ -3,7 +3,7 @@
 #include <math.h>
 
 // ============================================================
-// WEB HERO / GAMERANHA - ESP32 + MPU6050   (firmware FW3)
+// WEB HERO / GAMERANHA - ESP32 + MPU6050   (firmware FW4)
 //
 // Ligações:
 //   MPU6050  SDA -> GPIO 23 | SCL -> GPIO 22 | VCC 3V3 | GND
@@ -22,7 +22,7 @@
 // antes do resto do código e precisa conhecê-los.
 struct BuzzerStep { int frequency; unsigned long duration; };
 
-#define FW_VERSION "FW3"
+#define FW_VERSION "FW4"
 #define MPU_ADDR 0x68
 #define SDA_PIN 23
 #define SCL_PIN 22
@@ -35,7 +35,7 @@ const int ledPin = 2;
 const float GYRO_SCALE = 131.0f;      // MPU6050 em +/-250 graus/s
 const float ACCEL_SCALE = 16384.0f;   // MPU6050 em +/-2g
 const float DEFAULT_PITCH_RANGE_DEG = 22.0f;
-const float DEFAULT_ROLL_RANGE_DEG = 35.0f;
+const float DEFAULT_ROLL_RANGE_DEG = 90.0f;   // faixa larga: o site converte o giro para a tela
 const float FILTER_TAU = 0.24f;       // filtro complementar
 const int CALIBRATION_SAMPLES = 700;
 const int CALIBRATION_ATTEMPTS = 3;
@@ -279,7 +279,7 @@ void printSensitivity() {
 
 void setSensitivity(float pitch, float roll) {
   pitchRangeDeg = constrain(pitch, 8.0f, 45.0f);
-  rollRangeDeg = constrain(roll, 10.0f, 70.0f);
+  rollRangeDeg = constrain(roll, 10.0f, 120.0f);
   prefs.putFloat("pitch", pitchRangeDeg);
   prefs.putFloat("roll", rollRangeDeg);
   printSensitivity();

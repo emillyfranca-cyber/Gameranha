@@ -81,7 +81,7 @@ const Game = (() => {
     $('#setupPanel').classList.add('hidden');
     $('#playPanel').classList.remove('hidden');
     $('#hudHero').textContent = g.character.toUpperCase();
-    $('#heroAvatar').className = `hero-avatar ${HERO_CLASS[g.characterStyle] || 'peter'}`;
+    applyHand();
     updateHud();
     setMission();
     showMessage('PREPARE-SE...');
@@ -97,6 +97,18 @@ const Game = (() => {
       g.targetTimer = setInterval(spawnTargets, spawnInterval());
       g.clockTimer = setInterval(tick, 1000);
     }, 1100);
+  }
+
+  // O personagem fica no canto do lado da mão do jogador (o punho gira pouco para esse lado).
+  function applyHand() {
+    $('#heroAvatar').className = `hero-avatar ${HERO_CLASS[g.characterStyle] || 'peter'} hand-${ctl.hand}`;
+  }
+
+  // Onde a teia sai: centro do personagem.
+  function webOrigin() {
+    const a = arena().getBoundingClientRect();
+    const h = $('#heroAvatar').getBoundingClientRect();
+    return { x: h.left - a.left + h.width / 2, y: a.height - 42 };
   }
 
   const spawnInterval = () => LEVELS[g.level].interval;
@@ -281,8 +293,19 @@ const Game = (() => {
     const margin = kind === 'boss' ? 60 : 0;
     const maxX = Math.max(70, a.clientWidth - 75 - margin);
     const maxY = Math.max(150, a.clientHeight - 120 - margin);
-    target.style.left = `${45 + margin + Math.random() * (maxX - 45 - margin)}px`;
-    target.style.top = `${95 + margin + Math.random() * (maxY - 95 - margin)}px`;
+    // Sorteia a posição evitando a área do personagem (alguns sorteios no máximo).
+    const hero = $('#heroAvatar').getBoundingClientRect();
+    const arenaRect = a.getBoundingClientRect();
+    const zone = { l: hero.left - arenaRect.left - 70, r: hero.right - arenaRect.left + 20, t: hero.top - arenaRect.top - 70 };
+    let left = 0, top = 0;
+    for (let tries = 0; tries < 8; tries++) {
+      left = 45 + margin + Math.random() * (maxX - 45 - margin);
+      top = 95 + margin + Math.random() * (maxY - 95 - margin);
+      const overlapsHero = left + 62 > zone.l && left < zone.r && top + 82 > zone.t;
+      if (!overlapsHero) break;
+    }
+    target.style.left = `${left}px`;
+    target.style.top = `${top}px`;
 
     if (kind === 'boss') {
       target._hp = target._maxHp = BOSS_HP;
@@ -553,7 +576,8 @@ const Game = (() => {
     const a = arena().getBoundingClientRect();
     const line = $('#webLine');
     $('#webSvg').setAttribute('viewBox', `0 0 ${a.width} ${a.height}`);
-    line.setAttribute('x1', a.width / 2); line.setAttribute('y1', a.height - 42);
+    const origin = webOrigin();
+    line.setAttribute('x1', origin.x); line.setAttribute('y1', origin.y);
     line.setAttribute('x2', x); line.setAttribute('y2', y);
     line.style.opacity = '1';
     line.animate(keyframes, { duration, easing: 'ease-out' });
@@ -573,7 +597,7 @@ const Game = (() => {
 
   // ------------------------- API PÚBLICA -------------------------
   return {
-    begin, reset, abort, skipLevel, shootAtAim, updateAim, pointerAim,
+    begin, reset, abort, skipLevel, shootAtAim, updateAim, pointerAim, applyHand,
     isRunning,
     setCharacter: (name, style) => { g.character = name; g.characterStyle = style; },
     get phase() { return g.phase; }

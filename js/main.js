@@ -139,29 +139,71 @@ function refreshOperatorStatus() {
 function openOperatorPanel() {
   if (!askOperatorPin()) return;
   syncSensitivitySliders();
+  syncReach();
+  refreshMeasureText();
   refreshOperatorStatus();
   $('#operatorPanel').classList.add('visible');
 }
-const closeOperatorPanel = () => $('#operatorPanel').classList.remove('visible');
+const closeOperatorPanel = () => {
+  $('#operatorPanel').classList.remove('visible');
+  Controller.stopMeasure();
+};
 
 function syncSensitivitySliders() {
   $('#sensPitch').value = ctl.sens.pitch;
-  $('#sensRoll').value = ctl.sens.roll;
   $('#sensPitchValue').textContent = `${Number(ctl.sens.pitch).toFixed(0)}°`;
-  $('#sensRollValue').textContent = `${Number(ctl.sens.roll).toFixed(0)}°`;
 }
 
 function applySensitivity() {
   const pitch = Number($('#sensPitch').value);
-  const roll = Number($('#sensRoll').value);
   $('#sensPitchValue').textContent = `${pitch}°`;
-  $('#sensRollValue').textContent = `${roll}°`;
-  Controller.setSensitivity(pitch, roll);
+  Controller.setSensitivity(pitch);
 }
 
 $('#sensPitch').addEventListener('change', applySensitivity);
-$('#sensRoll').addEventListener('change', applySensitivity);
 document.addEventListener('sensitivity', syncSensitivitySliders);
+
+// ------------------------- MÃO E ALCANCE DO PULSO -------------------------
+function syncReach() {
+  $('#reachLeft').value = ctl.reach.left;
+  $('#reachRight').value = ctl.reach.right;
+  $('#reachLeftValue').textContent = `${ctl.reach.left}°`;
+  $('#reachRightValue').textContent = `${ctl.reach.right}°`;
+}
+
+function syncHand() {
+  $$('.chip[data-hand]').forEach(chip => chip.classList.toggle('selected', chip.dataset.hand === ctl.hand));
+  Game.applyHand();
+}
+
+function applyReachSliders() {
+  Controller.setReach(Number($('#reachLeft').value), Number($('#reachRight').value));
+}
+
+function refreshMeasureText() {
+  const m = Controller.measure();
+  const text = $('#opMeasureText');
+  $('#opApplyMeasure').disabled = !m.active;
+  $('#opMeasure').textContent = m.active ? 'REINICIAR MEDIÇÃO' : 'MEDIR ALCANCE';
+  text.textContent = m.active
+    ? `Gire o pulso até o limite confortável para a esquerda e para a direita. Medido: esquerda ${(-m.min).toFixed(0)}° · direita ${m.max.toFixed(0)}°`
+    : 'Dica: use MEDIR ALCANCE para descobrir o giro confortável deste jogador.';
+}
+
+$$('.chip[data-hand]').forEach(chip => chip.addEventListener('click', () => {
+  Controller.setHand(chip.dataset.hand);
+  toast(chip.dataset.hand === 'right' ? 'Mão direita: personagem no canto direito.' : 'Mão esquerda: personagem no canto esquerdo.');
+}));
+$('#reachLeft').addEventListener('input', applyReachSliders);
+$('#reachRight').addEventListener('input', applyReachSliders);
+$('#opMeasure').addEventListener('click', () => {
+  if (Controller.mode() !== 'hardware') { toast('Conecte e calibre o controle para medir o alcance.'); return; }
+  Controller.startMeasure();
+});
+$('#opApplyMeasure').addEventListener('click', () => { Controller.applyMeasure(); toast('Alcance atualizado com as medidas.'); });
+document.addEventListener('reach', syncReach);
+document.addEventListener('handchange', syncHand);
+document.addEventListener('measure', refreshMeasureText);
 
 $('#opClose').addEventListener('click', closeOperatorPanel);
 $('#opRecalibrate').addEventListener('click', () => { closeOperatorPanel(); Controller.startCalibration(); });
@@ -220,6 +262,8 @@ setInterval(() => {
 installCalibrationUI();
 Ranking.render();
 Ranking.restore();
+syncHand();
+syncReach();
 refreshSoundButton();
 
 if (new URLSearchParams(location.search).has('demo')) Controller.enterDemo();
