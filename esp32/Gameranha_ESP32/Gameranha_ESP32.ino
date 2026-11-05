@@ -198,6 +198,23 @@ bool configureMpu() {
   return ok && checkMpu();
 }
 
+// O MPU6050 pode demorar para ficar pronto depois que a energia chega (USB).
+// Tenta várias vezes, reiniciando o barramento I2C entre as tentativas.
+bool initSensor(int attempts) {
+  for (int i = 0; i < attempts; i++) {
+    if (i > 0) {
+      Wire.end();
+      delay(150);
+      Wire.begin(SDA_PIN, SCL_PIN);
+      Wire.setClock(100000);
+      Wire.setTimeOut(50);
+    }
+    if (configureMpu()) return true;
+    delay(150);
+  }
+  return false;
+}
+
 bool readImu() {
   Wire.beginTransmission(MPU_ADDR); Wire.write(0x3B);
   if (Wire.endTransmission(false) != 0) return false;
@@ -284,6 +301,7 @@ void setSensitivity(float pitch, float roll) {
 
 // ------------------------- CALIBRAÇÃO -------------------------
 bool calibrateGyro() {
+  if (!mpuPresent) mpuPresent = initSensor(3);   // última chance antes de desistir
   if (!mpuPresent) { sensorReady = false; calibrationError = true; Serial.println("SENSOR_ERROR"); return false; }
   sensorReady = false; calibrationError = false; calibrationInProgress = true;
   Serial.println("CALIBRATING");
@@ -441,7 +459,7 @@ void setup() {
   rollRangeDeg = prefs.getFloat("roll", DEFAULT_ROLL_RANGE_DEG);
 
   Wire.begin(SDA_PIN, SCL_PIN); Wire.setClock(100000); Wire.setTimeOut(50); delay(150);
-  mpuPresent = configureMpu();
+  mpuPresent = initSensor(5);
 
   Serial.print("HELLO:"); Serial.println(FW_VERSION);
   printSensitivity();
@@ -456,6 +474,17 @@ void loop() {
   updateBuzzer();
   updateVibration();
   updateLed();
+
+  // Sensor ausente no boot: continua tentando a cada 1 s e avisa o site quando aparecer.
+  static unsigned long lastSensorRetry = 0;
+  if (!mpuPresent && !calibrationInProgress && millis() - lastSensorRetry >= 1000) {
+    lastSensorRetry = millis();
+    if (configureMpu() && readImu()) {
+      mpuPresent = true; calibrationError = false;
+      Serial.println("SENSOR_OK");
+      Serial.println("CALIBRATION_REQUIRED");
+    }
+  }
 
   if (!sensorReady) { delay(5); return; }
   if (!readImu()) {
