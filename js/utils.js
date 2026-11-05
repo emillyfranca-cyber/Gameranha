@@ -48,3 +48,18 @@ function downloadFile(filename, content, mime) {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// O jogo antes se chamava WEB HERO. Copia as preferências e o ranking salvos com o nome antigo.
+(function migrateOldStorageKeys() {
+  const renames = {
+    webHeroRanking: 'gameranhaRanking', webHeroMuted: 'gameranhaMuted', webHeroSens: 'gameranhaSens',
+    webHeroReach: 'gameranhaReach', webHeroHand: 'gameranhaHand'
+  };
+  for (const [oldKey, newKey] of Object.entries(renames)) {
+    try {
+      const value = localStorage.getItem(oldKey);
+      if (value !== null && localStorage.getItem(newKey) === null) localStorage.setItem(newKey, value);
+      localStorage.removeItem(oldKey);
+    } catch (_) { /* localStorage indisponível: segue sem migrar */ }
+  }
+})();

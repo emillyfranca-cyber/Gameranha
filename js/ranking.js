@@ -6,16 +6,17 @@
 // - Funciona em Chrome/Edge (os mesmos navegadores exigidos pela Web Serial).
 //   Em outros navegadores, use o botão BACKUP JSON.
 //
-// Formato do arquivo: { "version": 1, "app": "web-hero", "updatedAt": "...", "entries": [ ... ] }
+// Formato do arquivo: { "version": 1, "app": "gameranha", "updatedAt": "...", "entries": [ ... ] }
 
 const Ranking = (() => {
-  const LOCAL_KEY = 'webHeroRanking';
-  const IDB_NAME = 'webHeroFiles';
+  const LOCAL_KEY = 'gameranhaRanking';
+  const IDB_NAME = 'gameranhaFiles';
+  const LEGACY_IDB_NAME = 'webHeroFiles';   // nome antigo (antes de o jogo se chamar Gameranha)
   const IDB_STORE = 'handles';
   const IDB_KEY = 'ranking';
   const MAX_ENTRIES = 500;
   const FS_SUPPORTED = 'showSaveFilePicker' in window;
-  const PICKER_TYPES = [{ description: 'Ranking WEB HERO (JSON)', accept: { 'application/json': ['.json'] } }];
+  const PICKER_TYPES = [{ description: 'Ranking Gameranha (JSON)', accept: { 'application/json': ['.json'] } }];
 
   let handle = null;          // FileSystemFileHandle do arquivo vinculado
   let fileName = '';
@@ -25,16 +26,16 @@ const Ranking = (() => {
   const notify = () => document.dispatchEvent(new CustomEvent('rankingfile'));
 
   // ------------------------- IndexedDB (guarda o "atalho" do arquivo) -------------------------
-  function openDb() {
+  function openDb(name = IDB_NAME) {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(IDB_NAME, 1);
+      const request = indexedDB.open(name, 1);
       request.onupgradeneeded = () => request.result.createObjectStore(IDB_STORE);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
   }
-  async function idbRun(mode, action) {
-    const db = await openDb();
+  async function idbRun(mode, action, dbName) {
+    const db = await openDb(dbName);
     return new Promise((resolve, reject) => {
       const request = action(db.transaction(IDB_STORE, mode).objectStore(IDB_STORE));
       request.onsuccess = () => resolve(request.result);
@@ -42,6 +43,7 @@ const Ranking = (() => {
     });
   }
   const idbGet = () => idbRun('readonly', store => store.get(IDB_KEY)).catch(() => null);
+  const idbGetLegacy = () => idbRun('readonly', store => store.get(IDB_KEY), LEGACY_IDB_NAME).catch(() => null);
   const idbSet = value => idbRun('readwrite', store => store.put(value, IDB_KEY)).catch(() => null);
 
   // ------------------------- LISTA -------------------------
@@ -102,7 +104,7 @@ const Ranking = (() => {
   async function writeFile(list) {
     const writable = await handle.createWritable();
     await writable.write(JSON.stringify({
-      version: 1, app: 'web-hero', updatedAt: new Date().toISOString(), entries: list
+      version: 1, app: 'gameranha', updatedAt: new Date().toISOString(), entries: list
     }, null, 2));
     await writable.close();
   }
@@ -121,6 +123,11 @@ const Ranking = (() => {
     if (!FS_SUPPORTED) return;
     try {
       if (!handle) handle = await idbGet();
+      if (!handle) {
+        // Migra o arquivo vinculado quando o jogo ainda se chamava WEB HERO.
+        handle = await idbGetLegacy();
+        if (handle) await idbSet(handle);
+      }
       if (!handle) { fileState = 'none'; return; }
       fileName = handle.name;
       if (await hasPermission(request)) await syncWithFile();
@@ -168,7 +175,7 @@ const Ranking = (() => {
     if (!FS_SUPPORTED) { toast('Este navegador não permite vincular arquivo. Use o Chrome ou o Edge.'); return false; }
     let picked;
     try {
-      picked = await window.showSaveFilePicker({ suggestedName: 'ranking-webhero.json', types: PICKER_TYPES });
+      picked = await window.showSaveFilePicker({ suggestedName: 'ranking-gameranha.json', types: PICKER_TYPES });
     } catch (error) {
       if (error.name === 'AbortError') return false; // cancelou
       throw error;
@@ -268,8 +275,8 @@ const Ranking = (() => {
 
   // Baixa uma cópia do ranking (funciona em qualquer navegador).
   async function exportJson() {
-    const payload = { version: 1, app: 'web-hero', updatedAt: new Date().toISOString(), entries: await load(MAX_ENTRIES) };
-    downloadFile(`webhero-ranking-${stamp()}.json`, JSON.stringify(payload, null, 2), 'application/json');
+    const payload = { version: 1, app: 'gameranha', updatedAt: new Date().toISOString(), entries: await load(MAX_ENTRIES) };
+    downloadFile(`gameranha-ranking-${stamp()}.json`, JSON.stringify(payload, null, 2), 'application/json');
   }
 
   async function exportCsv() {
@@ -278,7 +285,7 @@ const Ranking = (() => {
     const rows = (await load(MAX_ENTRIES)).map((e, i) =>
       [i + 1, e.name, e.character, e.score, e.accuracy ?? '', e.maxCombo ?? '', e.date].map(cell).join(','));
     // BOM para o Excel abrir acentos corretamente.
-    downloadFile(`webhero-ranking-${stamp()}.csv`, '﻿' + [header.join(','), ...rows].join('\n'), 'text/csv;charset=utf-8');
+    downloadFile(`gameranha-ranking-${stamp()}.csv`, '﻿' + [header.join(','), ...rows].join('\n'), 'text/csv;charset=utf-8');
   }
 
   // Apaga o ranking do navegador e, se vinculado, do arquivo.

@@ -3,7 +3,7 @@
 #include <math.h>
 
 // ============================================================
-// WEB HERO / GAMERANHA - ESP32 + MPU6050   (firmware FW4)
+// GAMERANHA - ESP32 + MPU6050   (firmware FW4)
 //
 // Ligações:
 //   MPU6050  SDA -> GPIO 23 | SCL -> GPIO 22 | VCC 3V3 | GND

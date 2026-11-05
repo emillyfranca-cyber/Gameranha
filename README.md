@@ -1,4 +1,4 @@
-# WEB HERO — Mundo SENAI
+# GAMERANHA — Mundo SENAI
 
 Jogo de tiro ao alvo com tema aracnídeo, controlado por um disparador de pulso
 (**ESP32 + MPU6050**) ligado ao navegador por USB (Web Serial). Só HTML, CSS e JavaScript:
@@ -8,15 +8,22 @@ não há servidor nem banco de dados. O ranking é gravado em um **arquivo JSON*
 1. Abra a pasta no VS Code e execute `index.html` com a extensão **Live Server**
    (a Web Serial só funciona em `localhost`/`https`, em **Chrome ou Edge**).
 2. Conecte o ESP32 por USB e clique em **CONECTAR DISPARADOR**.
-3. Calibre (braço parado, controle no pulso) e jogue.
+3. Calibre (braço parado, controle no pulso) e clique em **INICIAR MISSÃO**.
 4. No final da partida, digite o codinome para entrar no ranking.
 
-**Sem o controle?** Clique em **JOGAR SEM CONTROLE (DEMO)** ou abra `?demo`: a mira segue o
-mouse/toque e o clique dispara. Use como plano B no evento.
+O jogo só funciona com o controle conectado e calibrado.
+
+## Telas e botões
+- **RECALIBRAR** (tela inicial): refaz a calibração do sensor. Fica ativo com o controle conectado.
+  Se houver uma partida em andamento, o jogo pede para pará-la antes.
+- **■ PARAR E VOLTAR AO INÍCIO** (durante a partida): para o jogo e volta à tela inicial.
+  A pontuação da partida parada **não** é salva. A tecla `Esc` faz o mesmo.
+- **VOLTAR** (nas telas de calibração e contagem): cancela e volta.
+- Na tela final, **NÃO SALVAR E VOLTAR** descarta a pontuação.
 
 ## Ranking em arquivo JSON
-1. Na tela **Ranking**, clique em **VINCULAR ARQUIVO JSON** (ou no painel do operador, tecla `O`)
-   e escolha onde salvar, por exemplo `ranking-webhero.json`. Só precisa fazer isso **uma vez** por computador.
+1. Na tela **Ranking**, clique em **VINCULAR ARQUIVO JSON** (ou no painel do operador)
+   e escolha onde salvar, por exemplo `ranking-gameranha.json`. Só precisa fazer isso **uma vez** por computador.
 2. A partir daí, **cada pontuação salva reescreve o arquivo**. Ele pode ser aberto em qualquer editor.
 3. Se abrir o jogo de novo, o navegador lembra do arquivo. Ele pode pedir autorização de novo:
    clique em **AUTORIZAR ARQUIVO** (ou apenas aceite o aviso do navegador no primeiro clique).
@@ -27,7 +34,7 @@ Formato do arquivo:
 ```json
 {
   "version": 1,
-  "app": "web-hero",
+  "app": "gameranha",
   "updatedAt": "2026-11-05T00:50:00.000Z",
   "entries": [
     { "id": "...", "name": "Ana", "character": "Spider-Gwen", "score": 500,
@@ -56,11 +63,18 @@ Formato do arquivo:
 ## Atalhos
 | Tecla | Ação |
 |---|---|
-| `Espaço` | Disparar (**só no modo demo**) |
+| `Esc` | Fecha o painel do operador / sai do telão / **para o jogo e volta ao início** |
 | `C` | Centralizar a mira |
 | `M` | Ligar/desligar o som |
 | `F` | Tela cheia |
-| `O` | Painel do operador (senha em `OPERATOR_PIN`, `js/main.js`, padrão `2025`): recalibrar, sensibilidade, pular fase, encerrar, ranking |
+| `O` | Abrir/fechar o painel do operador |
+
+## Painel do operador (tecla `O` ou botão ⚙)
+Não tem senha. Mostra o estado do controle, do sensor e da partida e permite:
+- **Recalibrar** e **centralizar a mira** (os mesmos da tela inicial e da tecla `C`);
+- ajustar o **alcance vertical** e o **giro do pulso para cada lado** (ver abaixo), com **MEDIR ALCANCE**;
+- **Pular fase** (só durante o jogo) e **parar a partida e voltar ao início**;
+- **vincular o arquivo JSON** do ranking e **exportar CSV / backup JSON**.
 
 ## Hardware
 | Peça | Pino do ESP32 | Observação |
@@ -82,7 +96,7 @@ O punho gira bem mais para um lado do que para o outro. Por isso a mira **não �
 calibrada fica onde o alcance de um lado termina e o do outro começa, e cada lado é esticado até a borda da tela.
 - Na tela inicial, escolha **MÃO: DIREITA ou ESQUERDA**. O personagem fica no canto desse lado
   e o alcance é espelhado. O padrão (mão direita) é 45° para a esquerda e 20° para a direita.
-- No painel do operador (tecla `O`), ajuste o giro até a borda para cada lado ou use **MEDIR ALCANCE**:
+- No painel do operador, ajuste o giro até a borda para cada lado ou use **MEDIR ALCANCE**:
   o jogador gira o pulso até o limite confortável para os dois lados e **APLICAR MEDIDAS** grava os valores.
 - O firmware (FW4) envia o giro numa faixa larga (±90°) e o site converte para a tela.
 
@@ -94,13 +108,13 @@ O firmware se identifica com `HELLO:FW4`; o site avisa se a versão estiver desa
 ```
 index.html          páginas e painel do operador
 style.css           visual
-js/utils.js         utilidades (toast, storage, download)
+js/utils.js         utilidades (toast, storage, download) e migração das chaves antigas
 js/audio.js         efeitos sonoros (Web Audio)
 js/ranking.js       ranking: arquivo JSON (File System Access) + cópia no navegador
 js/game.js          regras do jogo, fases, alvos, combo, chefe, efeitos
 js/calibration-ui.js  tela de calibração e contagem regressiva
-js/controller.js    Web Serial, protocolo do ESP32 e modo demo
-js/main.js          ligação da interface, atalhos, operador, modo atração
+js/controller.js    Web Serial e protocolo do ESP32
+js/main.js          ligação da interface, botões, atalhos, operador, modo atração
 esp32/              firmware
 ```
 O protocolo serial está documentado no topo de `js/controller.js`.
@@ -110,5 +124,5 @@ O protocolo serial está documentado no topo de `js/controller.js`.
 - [ ] Na tela Ranking, **vincular o arquivo JSON** e conferir a mensagem "Ranking gravado no arquivo ...".
 - [ ] Fontes: o jogo carrega *Press Start 2P* e *Pixelify Sans* do Google Fonts.
       **Sem internet** usa fontes alternativas (funciona, mas o visual muda).
-- [ ] Ter um ESP32 reserva já gravado, cabo extra e o modo demo (`?demo`) como plano B.
+- [ ] Ter um ESP32 reserva já gravado e um cabo extra.
 - [ ] Ao final do dia, copiar o arquivo JSON e exportar o CSV.

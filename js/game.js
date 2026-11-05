@@ -85,7 +85,7 @@ const Game = (() => {
     updateHud();
     setMission();
     showMessage('PREPARE-SE...');
-    $('#crosshair').style.opacity = Controller.mode() === 'hardware' ? 1 : 0;
+    $('#crosshair').style.opacity = 1;
     drawCrosshair();
     startAimLoop();
 
@@ -458,15 +458,6 @@ const Game = (() => {
     $('#crosshair').style.opacity = 1;
   }
 
-  // Modo demo: a mira acompanha o ponteiro imediatamente.
-  function pointerAim(event) {
-    const rect = arena().getBoundingClientRect();
-    g.aimX = g.shownX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    g.aimY = g.shownY = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-    drawCrosshair();
-    $('#crosshair').style.opacity = 1;
-  }
-
   function drawCrosshair() {
     const a = arena();
     const crosshair = $('#crosshair');
@@ -597,7 +588,7 @@ const Game = (() => {
 
   // ------------------------- API PÚBLICA -------------------------
   return {
-    begin, reset, abort, skipLevel, shootAtAim, updateAim, pointerAim, applyHand,
+    begin, reset, abort, skipLevel, shootAtAim, updateAim, applyHand,
     isRunning,
     setCharacter: (name, style) => { g.character = name; g.characterStyle = style; },
     get phase() { return g.phase; }

@@ -2,7 +2,7 @@
 
 const Sfx = (() => {
   let ctx = null;
-  let muted = store.get('webHeroMuted', false);
+  let muted = store.get('gameranhaMuted', false);
 
   function ensure() {
     if (muted) return null;
@@ -58,7 +58,7 @@ const Sfx = (() => {
     },
     toggle() {
       muted = !muted;
-      store.set('webHeroMuted', muted);
+      store.set('gameranhaMuted', muted);
       return muted;
     },
     get muted() { return muted; }

@@ -1,12 +1,12 @@
-// Comunicação com o controle (ESP32 via Web Serial) e modo demonstração.
+// Comunicação com o controle (ESP32 via Web Serial).
 //
 // Protocolo ESP32 -> navegador (uma linha por mensagem):
-//   HELLO:FW2            versão do firmware
+//   HELLO:FW4            versão do firmware
 //   SENSOR_OK / SENSOR_ERROR / CALIBRATION_REQUIRED / CALIBRATING / CALIBRATION_ATTEMPT:n
 //   CALIBRATION_RETRY / CALIBRATION_OK / CALIBRATION_ERROR / READY / CENTER_OK / CENTER_ERROR
 //   I2C_RECOVERY / SENSOR_RECOVERED
 //   AIM:x,y              mira (0..1000)
-//   SHOOT                disparo (botão ou movimento brusco)
+//   SHOOT                disparo (somente ao apertar o botão do controle)
 //   SENS_OK:p,r          faixa atual em graus (vertical, horizontal). O AIM horizontal é
 //                        500 + giro/faixa*500; o site converte o giro para a tela (ver mapHorizontal)
 // Protocolo navegador -> ESP32:
@@ -14,7 +14,7 @@
 //   HIT, MISS, PENALTY, LEVEL   (feedback sonoro e de vibração no controle)
 
 const ctl = {
-  mode: 'none',                 // none | hardware | demo
+  mode: 'none',                 // none | hardware
   port: null, reader: null, writer: null, buffer: '', generation: 0,
   status: 'disconnected',       // disconnected | waiting | calibration_required | calibrating | retry | calibrated | ready | error
   attempt: 0,
@@ -38,45 +38,28 @@ const Controller = (() => {
   const decoder = new TextDecoder();
 
   // ------------------------- INTERFACE -------------------------
-  function setConnectionUI({ connected, text, connectLabel, connectDisabled, startLabel, startDisabled, demoLabel }) {
+  function setConnectionUI({ connected, text, connectLabel, connectDisabled, startLabel, startDisabled }) {
     $('#connectionDot').classList.toggle('connected', connected);
     $('#connectionText').textContent = text;
     $('#connectBtn').textContent = connectLabel;
     $('#connectBtn').disabled = connectDisabled;
     $('#startBtn').innerHTML = `${startLabel} <span>↗</span>`;
     $('#startBtn').disabled = startDisabled;
-    if (demoLabel) $('#demoBtn').textContent = demoLabel;
+    refreshRecalibrateButton();
+  }
+
+  // O botão RECALIBRAR só vale com o controle conectado e fora de uma calibração em andamento.
+  function refreshRecalibrateButton() {
+    const button = $('#recalibrateBtn');
+    if (!button) return;
+    button.disabled = !(ctl.mode === 'hardware' && ctl.writer && ctl.status !== 'calibrating' && ctl.status !== 'waiting');
   }
 
   const DISCONNECTED_UI = {
     connected: false, text: 'DISPARADOR NÃO CONECTADO',
     connectLabel: 'CONECTAR DISPARADOR', connectDisabled: false,
-    startLabel: 'AGUARDANDO CONTROLE', startDisabled: true,
-    demoLabel: 'JOGAR SEM CONTROLE (DEMO)'
+    startLabel: 'AGUARDANDO CONTROLE', startDisabled: true
   };
-
-  // ------------------------- MODO DEMO -------------------------
-  function enterDemo() {
-    if (ctl.port) { toast('Desconecte o controle antes de usar o modo demo.'); return; }
-    ctl.mode = 'demo';
-    ctl.status = 'ready';
-    setConnectionUI({
-      connected: true, text: 'MODO DEMO · MOUSE OU TOQUE',
-      connectLabel: 'CONECTAR DISPARADOR', connectDisabled: true,
-      startLabel: 'INICIAR MISSÃO', startDisabled: false,
-      demoLabel: 'USAR CONTROLE FÍSICO'
-    });
-    toast('Modo demo ativado: mire com o mouse e clique para disparar.');
-  }
-
-  function leaveDemo() {
-    ctl.mode = 'none';
-    ctl.status = 'disconnected';
-    ctl.pendingStart = false;
-    setConnectionUI(DISCONNECTED_UI);
-  }
-
-  const toggleDemo = () => (ctl.mode === 'demo' ? leaveDemo() : enterDemo());
 
   // ------------------------- ENVIO -------------------------
   async function send(command, quiet = false) {
@@ -108,12 +91,14 @@ const Controller = (() => {
     ctl.calibrationRequested = true;
     ctl.status = 'calibrating';
     ctl.attempt = 0;
+    refreshRecalibrateButton();
     showCalibrationUI();
     updateCalibrationUI();
     if (!(await send('CALIBRATE\n'))) {
       ctl.status = 'error';
       ctl.calibrationRequested = false;
       updateCalibrationUI();
+      refreshRecalibrateButton();
     }
   }
 
@@ -126,7 +111,7 @@ const Controller = (() => {
   // Sensibilidade vertical. O horizontal agora é definido por reach (alcance de cada lado).
   function setSensitivity(pitch) {
     ctl.sens = { pitch, roll: FW_ROLL_RANGE };
-    store.set('webHeroSens', ctl.sens);
+    store.set('gameranhaSens', ctl.sens);
     send(`SENS:${pitch.toFixed(1)},${FW_ROLL_RANGE.toFixed(1)}\n`, true);
   }
 
@@ -136,7 +121,7 @@ const Controller = (() => {
 
   function setReach(left, right) {
     ctl.reach = { left: clamp(Math.round(left), 8, 85), right: clamp(Math.round(right), 8, 85) };
-    store.set('webHeroReach', ctl.reach);
+    store.set('gameranhaReach', ctl.reach);
     document.dispatchEvent(new CustomEvent('reach'));
   }
 
@@ -145,7 +130,7 @@ const Controller = (() => {
     if (hand !== 'right' && hand !== 'left') return;
     if (hand !== ctl.hand) setReach(ctl.reach.right, ctl.reach.left);
     ctl.hand = hand;
-    store.set('webHeroHand', hand);
+    store.set('gameranhaHand', hand);
     document.dispatchEvent(new CustomEvent('handchange'));
   }
 
@@ -188,7 +173,6 @@ const Controller = (() => {
   async function connect(knownPort = null) {
     if (!('serial' in navigator)) { toast('Web Serial não disponível. Use Chrome ou Edge atualizado.'); return; }
     if (ctl.port) { toast('Já existe um controle conectado.'); return; }
-    if (ctl.mode === 'demo') { toast('Saia do modo demo para conectar o controle.'); return; }
 
     let port = knownPort;
     try {
@@ -209,8 +193,8 @@ const Controller = (() => {
         connectLabel: 'DISPARADOR CONECTADO', connectDisabled: true,
         startLabel: 'AGUARDANDO CALIBRAÇÃO', startDisabled: true
       });
-      $('#demoBtn').disabled = true;
       ctl.status = 'waiting';
+      refreshRecalibrateButton();
       ctl.attempt = 0;
       ctl.calibrationRequested = false;
       showCalibrationUI();
@@ -235,7 +219,6 @@ const Controller = (() => {
       ctl.mode = 'none';
       ctl.status = 'disconnected';
       setConnectionUI(DISCONNECTED_UI);
-      $('#demoBtn').disabled = false;
       hideCalibrationUI();
       if (error?.name !== 'NotFoundError') toast('Não foi possível conectar. Confira a placa e a permissão USB.');
     }
@@ -266,7 +249,6 @@ const Controller = (() => {
     ctl.generation++;
     Game.abort();
     setConnectionUI(DISCONNECTED_UI);
-    $('#demoBtn').disabled = false;
     hideCalibrationUI();
     toast('Disparador desconectado. Conecte novamente para continuar.');
   }
@@ -323,7 +305,7 @@ const Controller = (() => {
     toast(message);
   }
 
-  function handleLine(rawLine) {
+  function processLine(rawLine) {
     const line = rawLine.trim().toUpperCase();
     if (!line) return;
 
@@ -400,18 +382,23 @@ const Controller = (() => {
     }
   }
 
+  // Processa uma linha recebida e atualiza o botão RECALIBRAR conforme o novo estado.
+  function handleLine(rawLine) {
+    processLine(rawLine);
+    refreshRecalibrateButton();
+  }
+
   return {
     mode: () => ctl.mode,
-    isReady: () => ctl.mode === 'demo' || (ctl.mode === 'hardware' && !!ctl.writer && ctl.status === 'ready'),
-    connect, toggleDemo, enterDemo, leaveDemo,
-    send, feedback, startCalibration, center, setSensitivity, autoReconnect,
+    isReady: () => ctl.mode === 'hardware' && !!ctl.writer && ctl.status === 'ready',
+    connect, send, feedback, startCalibration, center, setSensitivity, autoReconnect,
     setHand, setReach, startMeasure, stopMeasure, applyMeasure,
     measure: () => ({ ...measure }),
-    mapHorizontal
+    mapHorizontal, handleLine, refreshRecalibrateButton
   };
 })();
 
 // Restaura as preferências salvas neste navegador.
-ctl.sens = { pitch: store.get('webHeroSens', ctl.sens).pitch || 22, roll: FW_ROLL_RANGE };
-ctl.hand = store.get('webHeroHand', 'right') === 'left' ? 'left' : 'right';
-ctl.reach = store.get('webHeroReach', DEFAULT_REACH[ctl.hand]);
+ctl.sens = { pitch: store.get('gameranhaSens', ctl.sens).pitch || 22, roll: FW_ROLL_RANGE };
+ctl.hand = store.get('gameranhaHand', 'right') === 'left' ? 'left' : 'right';
+ctl.reach = store.get('gameranhaReach', DEFAULT_REACH[ctl.hand]);
