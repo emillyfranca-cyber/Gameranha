@@ -256,17 +256,18 @@
           <span class="gradient-text">LENDAS.</span>
         </h1>
 
-        <p>As melhores pontuações salvas neste computador.</p>
+        <p>As melhores pontuações da missão.</p>
       </div>
 
       <section class="panel ranking-panel">
         <div class="section-heading">
           <div>
             <span class="step-label">TOP JOGADORES</span>
-            <h2>Ranking local</h2>
+            <h2>Ranking</h2>
           </div>
 
           <div class="ranking-actions">
+            <button id="linkFileBtn" class="text-btn" type="button">VINCULAR ARQUIVO JSON</button>
             <button id="boardBtn" class="text-btn" type="button">MODO TELÃO</button>
             <button id="exportCsvBtn" class="text-btn" type="button">EXPORTAR CSV</button>
             <button id="exportJsonBtn" class="text-btn" type="button">BACKUP JSON</button>
@@ -394,7 +395,9 @@
 
       <div class="op-group">
         <span class="input-label">RANKING</span>
+        <p id="opFileStatus" class="op-status"></p>
         <div class="op-buttons">
+          <button id="opLinkFile" class="secondary-btn" type="button">VINCULAR ARQUIVO JSON</button>
           <button id="opCsv" class="secondary-btn" type="button">EXPORTAR CSV</button>
           <button id="opJson" class="secondary-btn" type="button">BACKUP JSON</button>
         </div>

@@ -95,19 +95,32 @@ $('#rankingView').addEventListener('click', event => {
 $('#exportCsvBtn').addEventListener('click', () => Ranking.exportCsv());
 $('#exportJsonBtn').addEventListener('click', () => Ranking.exportJson());
 $('#clearRankingBtn').addEventListener('click', async () => {
-  const pin = askOperatorPin();
-  if (!pin) return;
-  if (confirm('Tem certeza que deseja APAGAR todo o ranking? Exporte um backup antes.')) {
-    const serverCleared = await Ranking.clear(pin);
+  if (!askOperatorPin()) return;
+  if (confirm('Tem certeza que deseja APAGAR todo o ranking (navegador e arquivo vinculado)? Exporte um backup antes.')) {
+    await Ranking.clear();
     await Ranking.render();
-    toast(serverCleared ? 'Ranking apagado.' : 'Ranking local apagado (servidor desligado ou senha recusada).');
+    toast('Ranking apagado.');
+  }
+});
+
+// Arquivo JSON do ranking: vincular na 1ª vez, autorizar nas próximas visitas.
+$('#linkFileBtn').addEventListener('click', () => Ranking.fileAction());
+$('#opLinkFile').addEventListener('click', () => Ranking.fileAction());
+document.addEventListener('rankingfile', () => Ranking.render());
+
+// O navegador pode pedir autorização de novo a cada visita. Aproveita o 1º clique na página.
+let authorizationTried = false;
+document.addEventListener('pointerdown', () => {
+  if (!authorizationTried && Ranking.fileState === 'needs-permission') {
+    authorizationTried = true;
+    Ranking.restore({ request: true });
   }
 });
 
 // ------------------------- PAINEL DO OPERADOR -------------------------
 let operatorUnlocked = false;
 
-// Devolve a senha (para enviar ao servidor) ou null se recusada.
+// Pede a senha do operador (uma vez por sessão). Devolve a senha ou null se recusada.
 function askOperatorPin() {
   if (operatorUnlocked) return OPERATOR_PIN;
   const typed = prompt('Senha do operador:');
@@ -206,6 +219,7 @@ setInterval(() => {
 // ------------------------- INICIALIZAÇÃO -------------------------
 installCalibrationUI();
 Ranking.render();
+Ranking.restore();
 refreshSoundButton();
 
 if (new URLSearchParams(location.search).has('demo')) Controller.enterDemo();

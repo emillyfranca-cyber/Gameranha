@@ -1,39 +1,47 @@
 # WEB HERO — Mundo SENAI
 
 Jogo de tiro ao alvo com tema aracnídeo, controlado por um disparador de pulso
-(**ESP32 + MPU6050**) ligado ao navegador por USB (Web Serial). O ranking é salvo
-em um banco **SQLite**.
+(**ESP32 + MPU6050**) ligado ao navegador por USB (Web Serial). Só HTML, CSS e JavaScript:
+não há servidor nem banco de dados. O ranking é gravado em um **arquivo JSON**.
 
 ## Como executar
-Precisa do **Node.js 22.13 ou mais novo** (o SQLite já vem dentro do Node; não há `npm install`).
-
-```bash
-node server.js
-```
-
-Abra **http://localhost:3333** no **Chrome ou Edge** (a Web Serial só funciona em `localhost`/`https`).
-
-1. Conecte o ESP32 por USB e clique em **CONECTAR DISPARADOR**.
-2. Calibre (braço parado, controle no pulso) e jogue.
-3. No final da partida, digite o codinome para entrar no ranking.
-
-O banco fica em `data/ranking.db` (não vai para o Git). Faça backup copiando esse arquivo
-ou pelo botão **EXPORTAR CSV** da tela de ranking.
-
-Opções do servidor (variáveis de ambiente):
-| Variável | Padrão | Para quê |
-|---|---|---|
-| `PORT` | `3333` | porta do site |
-| `HOST` | `127.0.0.1` | use `0.0.0.0` para abrir o ranking em outro aparelho da rede (ex.: telão) |
-| `OPERATOR_PIN` | `2025` | senha para apagar o ranking (o painel do operador usa `OPERATOR_PIN` em `js/main.js`; mantenha os dois iguais) |
-| `DB_PATH` | `data/ranking.db` | local do banco |
-
-**Sem o servidor?** O site também abre pelo Live Server/`index.html`, mas o ranking passa a ser
-salvo só no navegador (a tela de ranking avisa). Para usar o servidor de ranking a partir de outra
-origem: `index.html?api=http://IP:3333`.
+1. Abra a pasta no VS Code e execute `index.html` com a extensão **Live Server**
+   (a Web Serial só funciona em `localhost`/`https`, em **Chrome ou Edge**).
+2. Conecte o ESP32 por USB e clique em **CONECTAR DISPARADOR**.
+3. Calibre (braço parado, controle no pulso) e jogue.
+4. No final da partida, digite o codinome para entrar no ranking.
 
 **Sem o controle?** Clique em **JOGAR SEM CONTROLE (DEMO)** ou abra `?demo`: a mira segue o
 mouse/toque e o clique dispara. Use como plano B no evento.
+
+## Ranking em arquivo JSON
+1. Na tela **Ranking**, clique em **VINCULAR ARQUIVO JSON** (ou no painel do operador, tecla `O`)
+   e escolha onde salvar, por exemplo `ranking-webhero.json`. Só precisa fazer isso **uma vez** por computador.
+2. A partir daí, **cada pontuação salva reescreve o arquivo**. Ele pode ser aberto em qualquer editor.
+3. Se abrir o jogo de novo, o navegador lembra do arquivo. Ele pode pedir autorização de novo:
+   clique em **AUTORIZAR ARQUIVO** (ou apenas aceite o aviso do navegador no primeiro clique).
+4. O ranking também fica copiado no navegador, então nada se perde se o arquivo ainda não foi vinculado.
+   A tela de ranking sempre mostra onde ele está sendo gravado.
+
+Formato do arquivo:
+```json
+{
+  "version": 1,
+  "app": "web-hero",
+  "updatedAt": "2026-11-05T00:50:00.000Z",
+  "entries": [
+    { "id": "...", "name": "Ana", "character": "Spider-Gwen", "score": 500,
+      "accuracy": 80, "maxCombo": 7, "date": "05/11/2026", "createdAt": "2026-11-05T00:49:59.000Z" }
+  ]
+}
+```
+- Vincular um arquivo que já tem ranking **junta** os dois (sem duplicar). Isso permite levar o arquivo de um computador para outro.
+- Se o arquivo escolhido não for um ranking válido, o jogo pergunta antes de sobrescrevê-lo.
+- **EXPORTAR CSV** abre no Excel; **BACKUP JSON** baixa uma cópia (funciona em qualquer navegador).
+- Arquivos `ranking*.json` estão no `.gitignore`, porque têm nomes de pessoas.
+
+> A gravação em arquivo usa a *File System Access API*, disponível no Chrome e no Edge
+> (os mesmos navegadores que a Web Serial já exige).
 
 ## Como o jogo funciona
 - 3 fases de 30 s. **O jogo sempre começa fácil e a dificuldade sobe a cada fase** (FÁCIL → MÉDIO → DIFÍCIL):
@@ -52,7 +60,7 @@ mouse/toque e o clique dispara. Use como plano B no evento.
 | `C` | Centralizar a mira |
 | `M` | Ligar/desligar o som |
 | `F` | Tela cheia |
-| `O` | Painel do operador (recalibrar, sensibilidade, pular fase, encerrar, exportar) |
+| `O` | Painel do operador (senha em `OPERATOR_PIN`, `js/main.js`, padrão `2025`): recalibrar, sensibilidade, pular fase, encerrar, ranking |
 
 ## Hardware
 | Peça | Pino do ESP32 | Observação |
@@ -75,12 +83,11 @@ O firmware se identifica com `HELLO:FW3`; o site avisa se a versão estiver desa
 
 ## Estrutura do projeto
 ```
-server.js           servidor (site + API do ranking em SQLite)
 index.html          páginas e painel do operador
 style.css           visual
 js/utils.js         utilidades (toast, storage, download)
 js/audio.js         efeitos sonoros (Web Audio)
-js/ranking.js       ranking (API SQLite com reserva no navegador) e exportação
+js/ranking.js       ranking: arquivo JSON (File System Access) + cópia no navegador
 js/game.js          regras do jogo, fases, alvos, combo, chefe, efeitos
 js/calibration-ui.js  tela de calibração e contagem regressiva
 js/controller.js    Web Serial, protocolo do ESP32 e modo demo
@@ -89,17 +96,10 @@ esp32/              firmware
 ```
 O protocolo serial está documentado no topo de `js/controller.js`.
 
-### API do ranking
-| Método | Rota | O que faz |
-|---|---|---|
-| `GET` | `/api/ranking?limit=30` | lista, da maior para a menor pontuação |
-| `POST` | `/api/ranking` | salva `{name, character, score, accuracy, maxCombo}` e devolve a posição |
-| `DELETE` | `/api/ranking` | apaga tudo (cabeçalho `X-Operator-Pin`) |
-
 ## Checklist para o evento
 - [ ] Testar no computador do evento (Chrome/Edge) com a mesma porta USB.
-- [ ] Iniciar com `node server.js` e conferir que o ranking diz "salvo no banco de dados (SQLite)".
+- [ ] Na tela Ranking, **vincular o arquivo JSON** e conferir a mensagem "Ranking gravado no arquivo ...".
 - [ ] Fontes: o jogo carrega *Press Start 2P* e *Pixelify Sans* do Google Fonts.
       **Sem internet** usa fontes alternativas (funciona, mas o visual muda).
 - [ ] Ter um ESP32 reserva já gravado, cabo extra e o modo demo (`?demo`) como plano B.
-- [ ] Exportar o ranking (CSV) ao final do dia.
+- [ ] Ao final do dia, copiar o arquivo JSON e exportar o CSV.

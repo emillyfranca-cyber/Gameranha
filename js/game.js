@@ -184,7 +184,7 @@ const Game = (() => {
       if (runId !== g.runId) return; // o operador já voltou ao início
 
       Sfx.play(result.position === 1 ? 'record' : 'end');
-      const where = result.source === 'server' ? '' : ' (salvo só neste navegador: servidor do ranking desligado)';
+      const where = result.source === 'file' ? '' : ' (salvo só neste navegador: vincule o arquivo JSON na tela de ranking)';
       $('#resultRank').textContent =
         (result.position === 1 ? '🏆 NOVO RECORDE!' :
          result.position ? `VOCÊ FICOU EM ${result.position}º LUGAR` : 'CONTINUE TREINANDO PARA ENTRAR NO TOP') + where;
