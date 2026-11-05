@@ -72,14 +72,6 @@
           <span class="mini-icon">✦</span>
         </div>
 
-        <label class="input-label" for="playerName">SEU CODINOME</label>
-        <input
-          id="playerName"
-          maxlength="16"
-          placeholder="Ex.: AranhaAzul"
-          autocomplete="off"
-        >
-
         <div class="character-grid">
           <button
             class="character-card selected"
@@ -124,13 +116,6 @@
           </button>
         </div>
 
-        <span class="input-label">DIFICULDADE</span>
-        <div class="difficulty-row" role="group" aria-label="Dificuldade">
-          <button class="chip" type="button" data-difficulty="easy">FÁCIL</button>
-          <button class="chip selected" type="button" data-difficulty="normal">NORMAL</button>
-          <button class="chip" type="button" data-difficulty="hard">DIFÍCIL</button>
-        </div>
-
         <!-- CONEXÃO ANTES DO INÍCIO DA MISSÃO -->
         <div class="connection-status setup-connection">
           <span id="connectionDot"></span>
@@ -160,7 +145,7 @@
         </div>
 
         <div class="setup-footer">
-          <span>3 FASES · 30 SEGUNDOS POR FASE</span>
+          <span>3 FASES · COMEÇA FÁCIL E FICA MAIS DIFÍCIL A CADA FASE</span>
 
           <button id="startBtn" class="primary-btn" disabled>
             AGUARDANDO CONTROLE <span>↗</span>
@@ -252,7 +237,7 @@
         </div>
 
         <div class="game-note">
-          Mire com o movimento do pulso e aperte o botão do disparador
+          Mire com o movimento do pulso e aperte o botão do controle
           para lançar a teia. Acertos seguidos aumentam o combo;
           cuidado com os civis!
         </div>
@@ -291,10 +276,7 @@
 
         <div id="rankingList"></div>
 
-        <p class="local-warning">
-          Este ranking fica salvo neste navegador e computador.
-          Use EXPORTAR CSV ou BACKUP JSON para guardar os resultados.
-        </p>
+        <p id="rankingSource" class="local-warning"></p>
       </section>
     </section>
 
@@ -319,7 +301,8 @@
           <div>
             <h3>Escolha seu herói</h3>
             <p>
-              Digite um codinome e selecione uma das opções disponíveis.
+              Selecione uma das opções disponíveis. O codinome é pedido só no
+              final da missão, para entrar no ranking.
             </p>
           </div>
         </div>
@@ -340,8 +323,9 @@
           <div>
             <h3>Capture os bandidos</h3>
             <p>
-              Mire movimentando o pulso e aperte o botão para disparar a teia
-              nos criminosos. Os dourados valem 50 pontos, o relógio dá +3s e
+              Mire girando e inclinando o pulso e <strong>aperte o botão do
+              controle</strong> para disparar a teia nos criminosos
+              (mexer a mão sozinho não atira). Os dourados valem 50 pontos, o relógio dá +3s e
               acertos seguidos formam combos (x2, x3, x4).
               <strong>Não acerte os civis</strong>: eles tiram pontos e zeram o combo!
             </p>
@@ -353,8 +337,9 @@
           <div>
             <h3>Supere as três fases</h3>
             <p>
-              Você tem 30 segundos por fase.
-              Os alvos ficam mais rápidos a cada nível e, na última fase,
+              Você tem 30 segundos por fase. A missão começa fácil e a
+              dificuldade aumenta a cada fase: os alvos ficam mais rápidos,
+              duram menos e aparecem em maior número. Na última fase,
               um chefe aparece e precisa de vários acertos.
             </p>
           </div>

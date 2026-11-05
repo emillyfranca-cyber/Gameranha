@@ -7,24 +7,22 @@ const Game = (() => {
   const CIVIL_PENALTY = 30;
   const AIM_SMOOTHING_MS = 35;
 
+  // A dificuldade sobe a cada fase: o jogo sempre começa FÁCIL.
+  //   interval = tempo entre novos alvos (ms) | life = quanto o alvo fica na tela (ms)
+  //   count = alvos simultâneos | pad = folga (px) na área de acerto
   const LEVELS = {
-    1: { interval: 1050, life: 2400, count: 1, civil: 0,    clock: 0 },
-    2: { interval: 780,  life: 1800, count: 2, civil: 0.12, clock: 0.06 },
-    3: { interval: 560,  life: 1450, count: 2, civil: 0.18, clock: 0.06 }
+    1: { label: 'FÁCIL',   interval: 1300, life: 2900, count: 1, civil: 0,    clock: 0,    pad: 16 },
+    2: { label: 'MÉDIO',   interval: 950,  life: 2200, count: 2, civil: 0.10, clock: 0.06, pad: 10 },
+    3: { label: 'DIFÍCIL', interval: 650,  life: 1600, count: 2, civil: 0.16, clock: 0.06, pad: 6 }
   };
-
-  const DIFFICULTIES = {
-    easy:   { label: 'FÁCIL',   interval: 1.25, life: 1.3, civil: 0.6, pad: 16, bossHp: 3 },
-    normal: { label: 'NORMAL',  interval: 1,    life: 1,   civil: 1,   pad: 8,  bossHp: 4 },
-    hard:   { label: 'DIFÍCIL', interval: 0.85, life: 0.8, civil: 1.4, pad: 2,  bossHp: 6 }
-  };
+  const BOSS_HP = 4;
 
   const HERO_CLASS = { red: 'peter', black: 'miles', white: 'gwen' };
 
   const g = {
     phase: 'idle',          // idle | intro | playing | between | over
     runId: 0,               // invalida callbacks atrasados de partidas anteriores
-    player: '', character: 'Peter Parker', characterStyle: 'red', difficulty: 'normal',
+    character: 'Peter Parker', characterStyle: 'red',
     score: 0, level: 1, time: LEVEL_SECONDS,
     shots: 0, hits: 0, combo: 0, maxCombo: 0, civilHits: 0, bossSpawned: false,
     targetTimer: null, clockTimer: null, resultTimer: null, rafId: null, lastFrame: 0,
@@ -32,7 +30,6 @@ const Game = (() => {
   };
 
   const arena = () => $('#arena');
-  const diff = () => DIFFICULTIES[g.difficulty];
   const multiplier = () => (g.combo >= 15 ? 4 : g.combo >= 10 ? 3 : g.combo >= 5 ? 2 : 1);
   const isRunning = () => g.phase === 'intro' || g.phase === 'playing' || g.phase === 'between';
 
@@ -55,7 +52,7 @@ const Game = (() => {
 
   function setMission() {
     const names = { 1: 'CAPTURE OS BANDIDOS!', 2: 'CUIDADO COM OS CIVIS!', 3: 'ENFRENTE O CHEFE!' };
-    $('#missionText').textContent = `FASE ${g.level} · ${names[g.level]}`;
+    $('#missionText').textContent = `FASE ${g.level} · ${LEVELS[g.level].label} · ${names[g.level]}`;
   }
 
   function showMessage(text) {
@@ -102,7 +99,7 @@ const Game = (() => {
     }, 1100);
   }
 
-  const spawnInterval = () => LEVELS[g.level].interval * diff().interval;
+  const spawnInterval = () => LEVELS[g.level].interval;
 
   function tick() {
     if (g.phase !== 'playing') return;
@@ -141,18 +138,11 @@ const Game = (() => {
     stopTimers();
     clearTargets();
     const accuracy = g.shots ? Math.round((g.hits / g.shots) * 100) : 0;
-    const position = Ranking.add({
-      name: g.player, character: g.character, score: g.score, accuracy,
-      maxCombo: g.maxCombo, difficulty: diff().label,
-      date: new Date().toLocaleDateString('pt-BR')
-    });
-    Sfx.play(position === 1 ? 'record' : 'end');
+    const runId = g.runId;
+    Sfx.play('end');
     Controller.feedback('LEVEL');
 
-    const rankText = position === 1 ? '🏆 NOVO RECORDE!'
-      : position ? `VOCÊ FICOU EM ${position}º LUGAR`
-      : 'CONTINUE TREINANDO PARA ENTRAR NO RANKING';
-
+    // O nome só é pedido agora, no final da partida.
     showMessageHtml(`
       <div class="result-card">
         <div class="result-title">MISSÃO CONCLUÍDA</div>
@@ -162,22 +152,56 @@ const Game = (() => {
           <span>MELHOR COMBO<b>x${g.maxCombo}</b></span>
           <span>ACERTOS<b>${g.hits}/${g.shots}</b></span>
         </div>
-        <div class="result-rank">${rankText}</div>
-        <div class="result-actions">
+        <form id="saveForm" class="result-save">
+          <label class="result-label" for="finalName">DIGITE SEU CODINOME PARA ENTRAR NO RANKING</label>
+          <div class="result-save-row">
+            <input id="finalName" maxlength="16" placeholder="Ex.: AranhaAzul" autocomplete="off">
+            <button id="saveBtn" class="primary-btn" type="submit">SALVAR</button>
+          </div>
+        </form>
+        <div class="result-rank" id="resultRank"></div>
+        <div class="result-actions" id="resultActions" style="display:none">
           <button id="againBtn" class="primary-btn" type="button">JOGAR NOVAMENTE</button>
           <button id="rankBtn" class="secondary-btn" type="button">VER RANKING</button>
         </div>
+        <button id="skipSave" class="text-btn" type="button">NÃO SALVAR E VOLTAR</button>
         <div class="result-auto" id="autoReset"></div>
       </div>`);
+
     $('#againBtn').addEventListener('click', reset);
     $('#rankBtn').addEventListener('click', () => { reset(); showView('rankingView'); });
-    startAutoReset(25);
+    $('#skipSave').addEventListener('click', reset);
+
+    $('#saveForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const name = $('#finalName').value.replace(/[<>]/g, '').trim().slice(0, 16);
+      if (!name) { toast('Digite seu codinome para salvar.'); $('#finalName').focus(); return; }
+      $('#saveBtn').disabled = true;
+      $('#finalName').disabled = true;
+      const result = await Ranking.add({
+        name, character: g.character, score: g.score, accuracy, maxCombo: g.maxCombo
+      });
+      if (runId !== g.runId) return; // o operador já voltou ao início
+
+      Sfx.play(result.position === 1 ? 'record' : 'end');
+      const where = result.source === 'server' ? '' : ' (salvo só neste navegador: servidor do ranking desligado)';
+      $('#resultRank').textContent =
+        (result.position === 1 ? '🏆 NOVO RECORDE!' :
+         result.position ? `VOCÊ FICOU EM ${result.position}º LUGAR` : 'CONTINUE TREINANDO PARA ENTRAR NO TOP') + where;
+      $('#saveForm').style.display = 'none';
+      $('#skipSave').style.display = 'none';
+      $('#resultActions').style.display = 'flex';
+      startAutoReset(25, 'Voltando ao início em');
+    });
+
+    $('#finalName').focus();
+    startAutoReset(60, 'Sem salvar, voltando ao início em');
   }
 
-  function startAutoReset(seconds) {
+  function startAutoReset(seconds, prefix = 'Voltando ao início em') {
     let left = seconds;
     const label = $('#autoReset');
-    const update = () => { if (label) label.textContent = `Voltando ao início em ${left}s`; };
+    const update = () => { if (label) label.textContent = `${prefix} ${left}s`; };
     update();
     clearTimeout(g.resultTimer);
     const step = () => {
@@ -224,10 +248,9 @@ const Game = (() => {
 
   function pickKind() {
     const level = LEVELS[g.level];
-    const civil = level.civil * diff().civil;
     const roll = Math.random();
-    if (roll < civil) return 'civil';
-    if (roll < civil + level.clock) return 'clock';
+    if (roll < level.civil) return 'civil';
+    if (roll < level.civil + level.clock) return 'clock';
     return Math.random() < 0.2 ? 'gold' : 'normal';
   }
 
@@ -262,9 +285,9 @@ const Game = (() => {
     target.style.top = `${95 + margin + Math.random() * (maxY - 95 - margin)}px`;
 
     if (kind === 'boss') {
-      target._hp = target._maxHp = diff().bossHp;
+      target._hp = target._maxHp = BOSS_HP;
     }
-    const life = kind === 'boss' ? BOSS_LIFE_MS : level.life * diff().life;
+    const life = kind === 'boss' ? BOSS_LIFE_MS : level.life;
     target._expiry = setTimeout(() => removeTarget(target), life);
     $('#targetLayer').appendChild(target);
   }
@@ -293,7 +316,7 @@ const Game = (() => {
   // Escolhe o alvo sob a mira (com folga de acordo com a dificuldade).
   function findTarget(x, y) {
     const a = arena().getBoundingClientRect();
-    const pad = diff().pad;
+    const pad = LEVELS[g.level].pad;
     let best = null;
     let bestDist = Infinity;
     for (const target of $$('.target:not(.popped)')) {
@@ -552,10 +575,7 @@ const Game = (() => {
   return {
     begin, reset, abort, skipLevel, shootAtAim, updateAim, pointerAim,
     isRunning,
-    setPlayer: name => { g.player = name; },
     setCharacter: (name, style) => { g.character = name; g.characterStyle = style; },
-    setDifficulty: key => { if (DIFFICULTIES[key]) g.difficulty = key; },
-    get difficulty() { return g.difficulty; },
     get phase() { return g.phase; }
   };
 })();

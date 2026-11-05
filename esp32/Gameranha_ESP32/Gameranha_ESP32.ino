@@ -3,28 +3,26 @@
 #include <math.h>
 
 // ============================================================
-// WEB HERO / GAMERANHA - ESP32 + MPU6050   (firmware FW2)
+// WEB HERO / GAMERANHA - ESP32 + MPU6050   (firmware FW3)
 //
 // Ligações:
 //   MPU6050  SDA -> GPIO 23 | SCL -> GPIO 22 | VCC 3V3 | GND
 //   BUZZER   GPIO 19 (passivo)
-//   BOTÃO    GPIO 18 -> GND (usa pull-up interno)       [opcional]
+//   BOTÃO    GPIO 18 -> GND (usa pull-up interno)       [obrigatório p/ atirar]
 //   VIBRAÇÃO GPIO 5  -> base de um transistor NPN (ex.: BC548/2N2222)
 //            com resistor de 1k; motor entre 3V3/5V e o coletor,
 //            diodo 1N4148 em paralelo com o motor        [opcional]
 //   LED      GPIO 2 (LED da própria placa)
 //
 // Serial: 115200 baud. Protocolo documentado em js/controller.js.
-// Sem o botão ligado, o disparo continua funcionando por movimento
-// brusco do pulso (flick). Na primeira vez que o botão for apertado,
-// o flick é desativado automaticamente.
+// O disparo acontece SOMENTE ao apertar o botão. Mexer a mão não atira.
 // ============================================================
 
 // Os tipos ficam no topo: a Arduino IDE gera os protótipos das funções
 // antes do resto do código e precisa conhecê-los.
 struct BuzzerStep { int frequency; unsigned long duration; };
 
-#define FW_VERSION "FW2"
+#define FW_VERSION "FW3"
 #define MPU_ADDR 0x68
 #define SDA_PIN 23
 #define SCL_PIN 22
@@ -55,13 +53,9 @@ const float BIAS_ADAPT_RATE = 0.00015f;
 const int MAX_READ_ERRORS = 3;
 
 // Disparo
-const unsigned long FLICK_COOLDOWN_MS = 700;
 const unsigned long BUTTON_COOLDOWN_MS = 120;
 const unsigned long BUTTON_DEBOUNCE_MS = 25;
 const unsigned long BUTTON_LONG_PRESS_MS = 1000;   // segurar = calibrar (quando não calibrado)
-const float SHOT_GYRO_THRESHOLD_DPS = 120.0f;
-const int SHOT_CONFIRM_SAMPLES = 2;
-const unsigned long FLICK_AIM_FREEZE_MS = 300;     // congela a mira após o flick
 
 // Mira enviada ~50 vezes por segundo
 const unsigned long AIM_INTERVAL_MS = 20;
@@ -90,19 +84,11 @@ bool calibrationInProgress = false;
 unsigned long lastImuTime = 0, lastAimSend = 0, lastShotTime = 0;
 unsigned long restStartedAt = 0;
 bool restCandidate = false;
-int shotConfirmCount = 0;
 int consecutiveReadErrors = 0;
 
-// Botão e flick
+// Botão de disparo
 bool buttonRaw = false, buttonPressed = false, buttonLongHandled = false;
 unsigned long buttonChangedAt = 0, buttonPressedAt = 0;
-bool buttonDetected = false;   // true depois do primeiro aperto => flick desativado
-unsigned long aimFrozenUntil = 0;
-
-// Histórico da mira (para o flick não "puxar" a mira no momento do tiro)
-const int AIM_HISTORY = 8;
-int aimHistX[AIM_HISTORY], aimHistY[AIM_HISTORY];
-int aimHistHead = 0, aimHistCount = 0;
 
 // ------------------------- LED E VIBRAÇÃO -------------------------
 unsigned long vibrationUntil = 0;
@@ -235,7 +221,7 @@ bool readImu() {
 
 void invalidateCalibration() {
   sensorReady = false; calibrationError = false; calibrationInProgress = false;
-  restCandidate = false; shotConfirmCount = 0;
+  restCandidate = false;
 }
 
 void recoverI2c() {
@@ -345,8 +331,7 @@ bool calibrateGyro() {
     }
     pitchDeg = accelPitch(); rollDeg = accelRoll();
     pitchCenterDeg = pitchDeg; rollCenterDeg = rollDeg;
-    lastImuTime = micros(); lastAimSend = 0; restCandidate = false; shotConfirmCount = 0; consecutiveReadErrors = 0;
-    aimHistCount = 0; aimHistHead = 0; aimFrozenUntil = 0;
+    lastImuTime = micros(); lastAimSend = 0; restCandidate = false; consecutiveReadErrors = 0;
     calibrationInProgress = false; calibrationError = false; sensorReady = true;
     Serial.println("CALIBRATION_OK"); Serial.println("CENTER_OK"); Serial.println("READY");
     startWebSound(); vibrate(80);
@@ -371,20 +356,6 @@ void fireShot() {
   startShotSound();
   vibrate(25);
   lastShotTime = millis();
-  shotConfirmCount = 0;
-}
-
-void pushAimHistory(int x, int y) {
-  aimHistX[aimHistHead] = x; aimHistY[aimHistHead] = y;
-  aimHistHead = (aimHistHead + 1) % AIM_HISTORY;
-  if (aimHistCount < AIM_HISTORY) aimHistCount++;
-}
-
-bool oldestAim(int &x, int &y) {
-  if (aimHistCount == 0) return false;
-  int index = (aimHistHead - aimHistCount + AIM_HISTORY) % AIM_HISTORY;
-  x = aimHistX[index]; y = aimHistY[index];
-  return true;
 }
 
 // Botão: aperto = disparo. Segurar 1 s com o sensor não calibrado = calibrar.
@@ -399,7 +370,6 @@ void handleButton() {
     if (buttonPressed) {
       buttonPressedAt = now;
       buttonLongHandled = false;
-      buttonDetected = true;   // existe botão ligado: desliga o disparo por flick
       if (sensorReady && now - lastShotTime >= BUTTON_COOLDOWN_MS) fireShot();
     }
   } else if (buttonPressed && !sensorReady && !calibrationInProgress && mpuPresent &&
@@ -540,26 +510,9 @@ void loop() {
 
   if (millis() - lastAimSend >= AIM_INTERVAL_MS) {
     lastAimSend = millis();
-    pushAimHistory((int)aimX, (int)aimY);
-    if ((long)(millis() - aimFrozenUntil) >= 0) {
-      Serial.print("AIM:"); Serial.print((int)aimX); Serial.print(','); Serial.println((int)aimY);
-    }
+    Serial.print("AIM:"); Serial.print((int)aimX); Serial.print(','); Serial.println((int)aimY);
   }
 
-  // Disparo por movimento brusco (flick). Só vale enquanto nenhum botão foi detectado.
-  if (!buttonDetected) {
-    float gyroMagnitude = sqrtf(gx * gx + gy * gy + gz * gz);
-    if (gyroMagnitude >= SHOT_GYRO_THRESHOLD_DPS) shotConfirmCount++;
-    else shotConfirmCount = 0;
-    if (shotConfirmCount >= SHOT_CONFIRM_SAMPLES && millis() - lastShotTime >= FLICK_COOLDOWN_MS) {
-      // O próprio movimento do tiro desloca a mira. Usa a posição de ~150 ms antes.
-      int hx, hy;
-      if (oldestAim(hx, hy)) {
-        Serial.print("AIM:"); Serial.print(hx); Serial.print(','); Serial.println(hy);
-      }
-      fireShot();
-      aimFrozenUntil = millis() + FLICK_AIM_FREEZE_MS;
-    }
-  }
+  // O disparo acontece SOMENTE pelo botão (ver handleButton). Mexer a mão nunca atira.
   delay(2);
 }

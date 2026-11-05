@@ -156,3 +156,11 @@ h1 { font-size:clamp(25px,4.3vw,42px)!important; line-height:1.5!important; lett
   .ranking-actions{justify-content:flex-start}
   .result-stats{grid-template-columns:1fr}
 }
+
+/* nome pedido no final da partida */
+.result-save{margin:0 0 12px}
+.result-label{display:block;font-size:12px;letter-spacing:1px;color:#a9c8ee;font-weight:700;margin-bottom:8px}
+.result-save-row{display:flex;gap:8px}
+.result-save-row input{flex:1;min-width:0}
+.result-card .text-btn{display:block;margin:10px auto 0}
+.result-card{padding:4px 0}

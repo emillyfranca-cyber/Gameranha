@@ -13,33 +13,21 @@ function showView(id) {
 
 $$('.tab').forEach(btn => btn.addEventListener('click', () => showView(btn.dataset.view)));
 
-// ------------------------- PERSONAGEM E DIFICULDADE -------------------------
+// ------------------------- PERSONAGEM -------------------------
 $$('.character-card').forEach(card => card.addEventListener('click', () => {
   $$('.character-card').forEach(c => c.classList.remove('selected'));
   card.classList.add('selected');
   Game.setCharacter(card.dataset.character, card.dataset.color);
 }));
 
-$$('.chip[data-difficulty]').forEach(chip => chip.addEventListener('click', () => {
-  $$('.chip[data-difficulty]').forEach(c => c.classList.remove('selected'));
-  chip.classList.add('selected');
-  Game.setDifficulty(chip.dataset.difficulty);
-  store.set('webHeroDifficulty', chip.dataset.difficulty);
-}));
-
 // ------------------------- INÍCIO DA MISSÃO -------------------------
+// O jogo sempre começa fácil e a dificuldade sobe a cada fase (ver LEVELS em game.js).
+// O codinome só é pedido no final da partida.
 function startGame() {
-  const name = $('#playerName').value.trim().replace(/[<>]/g, '').slice(0, 16);
-  if (!name) {
-    toast('Digite seu codinome antes de começar.');
-    $('#playerName').focus();
-    return;
-  }
   if (!Controller.isReady()) {
     toast('Conecte e calibre o disparador (ou use o modo demo) antes de iniciar.');
     return;
   }
-  Game.setPlayer(name);
   ctl.pendingStart = true;
   showCalibrationUI();
   updateCalibrationUI();
@@ -49,7 +37,12 @@ function startGame() {
 $('#startBtn').addEventListener('click', startGame);
 $('#connectBtn').addEventListener('click', () => Controller.connect());
 $('#demoBtn').addEventListener('click', () => Controller.toggleDemo());
-$('#shootBtn').addEventListener('click', () => Game.shootAtAim());
+// Com o controle físico, só o botão do controle atira. Mouse/teclado atiram apenas no modo demo.
+function manualShoot() {
+  if (Controller.mode() !== 'demo') { toast('Use o botão do controle para disparar.'); return; }
+  Game.shootAtAim();
+}
+$('#shootBtn').addEventListener('click', manualShoot);
 
 // ------------------------- MIRA COM MOUSE (SÓ NO MODO DEMO) -------------------------
 const arenaEl = $('#arena');
@@ -101,25 +94,27 @@ $('#rankingView').addEventListener('click', event => {
 // ------------------------- RANKING -------------------------
 $('#exportCsvBtn').addEventListener('click', () => Ranking.exportCsv());
 $('#exportJsonBtn').addEventListener('click', () => Ranking.exportJson());
-$('#clearRankingBtn').addEventListener('click', () => {
-  if (!askOperatorPin()) return;
-  if (confirm('Tem certeza que deseja apagar o ranking salvo neste navegador? Exporte um backup antes.')) {
-    Ranking.clear();
-    Ranking.render();
-    toast('Ranking local apagado.');
+$('#clearRankingBtn').addEventListener('click', async () => {
+  const pin = askOperatorPin();
+  if (!pin) return;
+  if (confirm('Tem certeza que deseja APAGAR todo o ranking? Exporte um backup antes.')) {
+    const serverCleared = await Ranking.clear(pin);
+    await Ranking.render();
+    toast(serverCleared ? 'Ranking apagado.' : 'Ranking local apagado (servidor desligado ou senha recusada).');
   }
 });
 
 // ------------------------- PAINEL DO OPERADOR -------------------------
 let operatorUnlocked = false;
 
+// Devolve a senha (para enviar ao servidor) ou null se recusada.
 function askOperatorPin() {
-  if (operatorUnlocked) return true;
+  if (operatorUnlocked) return OPERATOR_PIN;
   const typed = prompt('Senha do operador:');
-  if (typed === null) return false;
-  if (typed === OPERATOR_PIN) { operatorUnlocked = true; return true; }
+  if (typed === null) return null;
+  if (typed === OPERATOR_PIN) { operatorUnlocked = true; return OPERATOR_PIN; }
   toast('Senha incorreta.');
-  return false;
+  return null;
 }
 
 function refreshOperatorStatus() {
@@ -170,7 +165,7 @@ document.addEventListener('keydown', event => {
 
   if (event.code === 'Space' && Game.isRunning() && !typing) {
     event.preventDefault();
-    Game.shootAtAim();
+    if (Controller.mode() === 'demo') Game.shootAtAim();
     return;
   }
   if (typing || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -212,10 +207,6 @@ setInterval(() => {
 installCalibrationUI();
 Ranking.render();
 refreshSoundButton();
-
-const savedDifficulty = store.get('webHeroDifficulty', 'normal');
-const savedChip = $(`.chip[data-difficulty="${savedDifficulty}"]`);
-if (savedChip) savedChip.click();
 
 if (new URLSearchParams(location.search).has('demo')) Controller.enterDemo();
 else Controller.autoReconnect();
