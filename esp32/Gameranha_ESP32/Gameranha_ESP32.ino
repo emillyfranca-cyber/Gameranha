@@ -20,6 +20,10 @@
 // o flick é desativado automaticamente.
 // ============================================================
 
+// Os tipos ficam no topo: a Arduino IDE gera os protótipos das funções
+// antes do resto do código e precisa conhecê-los.
+struct BuzzerStep { int frequency; unsigned long duration; };
+
 #define FW_VERSION "FW2"
 #define MPU_ADDR 0x68
 #define SDA_PIN 23
@@ -130,7 +134,6 @@ void updateLed() {
 }
 
 // ------------------------- BUZZER -------------------------
-struct BuzzerStep { int frequency; unsigned long duration; };
 BuzzerStep buzzerSteps[4];
 int buzzerStepCount = 0, buzzerStepIndex = 0;
 bool buzzerActive = false, buzzerPinState = false;
@@ -499,7 +502,9 @@ void loop() {
   } else restCandidate = false;
 
   // Mira horizontal usa ROLL (gravidade observável), não yaw (que deriva sem magnetômetro).
-  float aimX = 500.0f - ((rollDeg - rollCenterDeg) / rollRangeDeg) * 500.0f;
+  // Sinal invertido de propósito: com a placa montada atual, girar o pulso
+  // para a direita deve mover a mira para a direita.
+  float aimX = 500.0f + ((rollDeg - rollCenterDeg) / rollRangeDeg) * 500.0f;
   float aimY = 500.0f + ((pitchDeg - pitchCenterDeg) / pitchRangeDeg) * 500.0f;
   aimX = constrain(aimX, 0.0f, 1000.0f);
   aimY = constrain(aimY, 0.0f, 1000.0f);
