@@ -19,6 +19,7 @@ const Game = (() => {
   const BOSS_HP = 4;
 
   const HERO_CLASS = { red: 'peter', black: 'miles', white: 'gwen' };
+  const HERO_SPRITE = { peter: 'assets/hero-peter.png', miles: 'assets/hero-miles.png', gwen: 'assets/hero-gwen.png' };
 
   const g = {
     phase: 'idle',          // idle | intro | playing | between | over
@@ -27,7 +28,8 @@ const Game = (() => {
     score: 0, level: 1, time: LEVEL_SECONDS,
     shots: 0, hits: 0, combo: 0, maxCombo: 0, civilHits: 0, bossSpawned: false,
     targetTimer: null, clockTimer: null, resultTimer: null, rafId: null, lastFrame: 0,
-    aimX: 0.5, aimY: 0.5, shownX: 0.5, shownY: 0.5
+    aimX: 0.5, aimY: 0.5, shownX: 0.5, shownY: 0.5,
+    heroDir: -1, heroFlip: 1, heroTilt: 0
   };
 
   const arena = () => $('#arena');
@@ -90,7 +92,7 @@ const Game = (() => {
     drawCrosshair();
     startAimLoop();
 
-    later(() => showMessage('VAI!'), 500);
+    later(() => { showMessage('VAI!'); heroFx('cheer', 650); }, 500);
     later(() => {
       hideMessage();
       g.phase = 'playing';
@@ -100,16 +102,53 @@ const Game = (() => {
     }, 1100);
   }
 
-  // O personagem fica no canto do lado da mão do jogador (o punho gira pouco para esse lado).
+  // O personagem fica no canto do lado da mão do jogador (o punho gira pouco para esse lado)
+  // e usa o sprite do herói escolhido.
   function applyHand() {
-    $('#heroAvatar').className = `hero-avatar ${HERO_CLASS[g.characterStyle] || 'peter'} hand-${ctl.hand}`;
+    const key = HERO_CLASS[g.characterStyle] || 'peter';
+    const hero = $('#heroAvatar');
+    hero.className = `hero-avatar ${key} hand-${ctl.hand}`;
+    const img = $('#heroImg');
+    if (!img.src.endsWith(HERO_SPRITE[key])) img.src = HERO_SPRITE[key];
+    img.alt = `${g.character} pronto para disparar teia`;
+    g.heroDir = ctl.hand === 'right' ? -1 : 1; // olha para dentro da arena
+    updateHeroPose(true);
   }
 
-  // Onde a teia sai: centro do personagem.
+  // Reação do herói (shoot, cheer, hurt): liga uma classe de animação por alguns instantes.
+  function heroFx(name, ms = 400) {
+    const hero = $('#heroAvatar');
+    hero.classList.remove(name);
+    void hero.offsetWidth; // reinicia a animação se já estava ligada
+    hero.classList.add(name);
+    clearTimeout(hero[`_fx_${name}`]);
+    hero[`_fx_${name}`] = setTimeout(() => hero.classList.remove(name), ms);
+  }
+
+  // Vira e inclina o herói na direção da mira (chamado a cada frame).
+  function updateHeroPose(force = false) {
+    const hero = $('#heroAvatar');
+    const a = arena();
+    const dx = g.shownX * a.clientWidth - (hero.offsetLeft + hero.offsetWidth / 2);
+    if (dx < -30) g.heroDir = -1;
+    else if (dx > 30) g.heroDir = 1;           // zona morta evita ficar virando de lado
+    const facing = -1;                          // os sprites originais olham para a esquerda
+    const flip = g.heroDir === facing ? 1 : -1;
+    const tilt = Math.max(-9, Math.min(9, (dx / a.clientWidth) * 18));
+    if (force || flip !== g.heroFlip || Math.abs(tilt - g.heroTilt) > 0.4) {
+      g.heroFlip = flip;
+      g.heroTilt = tilt;
+      hero.style.setProperty('--flip', flip);
+      hero.style.setProperty('--tilt', `${tilt.toFixed(1)}deg`);
+      hero.style.setProperty('--dir', g.heroDir);
+    }
+  }
+
+  // Onde a teia sai: da mão do herói, do lado em que ele está mirando.
   function webOrigin() {
     const a = arena().getBoundingClientRect();
     const h = $('#heroAvatar').getBoundingClientRect();
-    return { x: h.left - a.left + h.width / 2, y: a.height - 42 };
+    return { x: h.left - a.left + h.width * (0.5 + 0.22 * g.heroDir), y: h.top - a.top + h.height * 0.48 };
   }
 
   const spawnInterval = () => LEVELS[g.level].interval;
@@ -134,6 +173,7 @@ const Game = (() => {
       setMission();
       showMessage(`FASE ${g.level - 1} CONCLUÍDA! PREPARE-SE...`);
       Sfx.play('level');
+      heroFx('cheer', 900);
       Controller.feedback('LEVEL');
       later(() => {
         hideMessage();
@@ -372,6 +412,9 @@ const Game = (() => {
     }
     g.shots++;
     Sfx.play('shot');
+    heroFx('shoot', 220);
+    const hand = webOrigin();
+    particles(hand.x, hand.y, '#e7f5ff', 5); // faíscas de teia saindo da mão
     const rect = arena().getBoundingClientRect();
     const x = g.aimX * rect.width;
     const y = g.aimY * rect.height;
@@ -413,6 +456,7 @@ const Game = (() => {
       g.score = Math.max(0, g.score - CIVIL_PENALTY);
       floatText(c.x, c.y, `-${CIVIL_PENALTY}`, 'bad');
       Sfx.play('penalty');
+      heroFx('hurt', 520);
       Controller.feedback('PENALTY');
       shake();
       target.classList.add('oops');
@@ -441,6 +485,7 @@ const Game = (() => {
         award(200, c, 'gold');
         floatText(c.x, c.y - 34, 'CHEFE DERROTADO!', 'combo');
         Sfx.play('bossdown');
+        heroFx('cheer', 1000);
         particles(c.x, c.y, '#ffe06d', 22);
         Controller.feedback('LEVEL');
         popTarget(target);
@@ -462,6 +507,7 @@ const Game = (() => {
     if (milestone) {
       floatText(c.x, c.y - 52, `COMBO x${multiplier()}!`, 'combo');
       Sfx.play('combo');
+      heroFx('cheer', 700);
     }
     updateHud();
   }
@@ -479,6 +525,7 @@ const Game = (() => {
     const crosshair = $('#crosshair');
     crosshair.style.left = `${g.shownX * a.clientWidth}px`;
     crosshair.style.top = `${g.shownY * a.clientHeight}px`;
+    updateHeroPose();
   }
 
   // O ESP32 envia a mira ~50x por segundo; aqui ela é suavizada a cada frame.

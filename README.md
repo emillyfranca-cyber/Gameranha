@@ -63,6 +63,9 @@ Formato do arquivo:
   - **chefe** na fase 3: leva vários acertos, pisca ao ser atingido e **fica furioso** com metade da vida.
 - Os alvos sobem do chão ao surgir, **tremem e piscam antes de sumir**, mostram uma **barra com o tempo restante** e,
   ao serem atingidos, ficam presos em um **casulo de teia**. Na fase fácil eles são maiores.
+- **Cada herói tem o próprio sprite** em jogo (Peter, Miles e Gwen) e ele é animado: respira parado, **vira e se inclina
+  na direção da mira**, recua ao atirar (a teia sai da mão dele), **pula ao fazer combo**, ao passar de fase e ao
+  derrotar o chefe, e **treme e fica vermelho** ao acertar um civil. Com a mão esquerda ele fica no canto esquerdo e olha para a direita.
 - O **codinome é pedido só no final**, na tela de resultado (precisão, melhor combo e posição no ranking).
   Sem salvar, volta sozinho ao início em 60 s.
 - Modo atração: com a tela parada por 60 s, mostra o ranking em tela cheia.
@@ -116,6 +119,8 @@ O firmware se identifica com `HELLO:FW4`; o site avisa se a versão estiver desa
 index.html          páginas e painel do operador
 style.css           visual
 css/alvos.css       alvos, animações e tela de escolha de heróis (carrega depois do style.css)
+css/heroi.css       herói em jogo: tamanho por personagem e animações (respirar, mirar, tiro, comemorar, dano)
+assets/hero-*.png   sprites dos heróis em jogo (fundo transparente, cortados na altura das coxas)
 js/sprites.js       desenhos SVG dos alvos (bandidos, robô, civil, relógio, chefe)
 js/utils.js         utilidades (toast, storage, download) e migração das chaves antigas
 js/audio.js         efeitos sonoros (Web Audio)

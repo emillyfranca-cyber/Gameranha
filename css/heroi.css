@@ -1,0 +1,70 @@
+/* Herói em jogo: sprite próprio por personagem e animações (js/game.js liga as classes).
+   Camadas: .hero-avatar (posição e brilho) > .hero-bob (respirar, recuo, pulo) > img (vira e inclina para a mira).
+   Variáveis definidas pelo JS: --flip (1 | -1), --tilt (graus), --dir (-1 esquerda | 1 direita). */
+
+.hero-avatar {
+  position: absolute; z-index: 5; bottom: -2px;
+  width: auto; height: var(--hero-h, 210px);
+  filter: drop-shadow(0 0 14px #2ed8ff8c);
+  pointer-events: none; display: block;
+}
+/* alturas ajustadas para as cabeças ficarem do mesmo tamanho */
+.hero-avatar.peter { --hero-h: 200px; }
+.hero-avatar.miles { --hero-h: 232px; }
+.hero-avatar.gwen  { --hero-h: 238px; }
+.hero-avatar.hand-right { left: auto; right: 3%; }
+.hero-avatar.hand-left { left: 3%; right: auto; }
+
+.hero-bob {
+  height: 100%; transform-origin: 50% 100%;
+  animation: heroBreath 2.6s ease-in-out infinite;
+}
+.hero-avatar img,
+.hero-avatar.miles img,
+.hero-avatar.gwen img {
+  display: block; width: auto; height: 100%; max-width: none; object-fit: unset;
+  filter: none; user-select: none; -webkit-user-drag: none;
+  transform: rotate(var(--tilt, 0deg)) scaleX(var(--flip, 1));
+  transform-origin: 50% 100%;
+  transition: transform .14s ease-out;
+}
+
+/* parado: respira e balança de leve */
+@keyframes heroBreath {
+  0%, 100% { transform: scale(1, 1) translateY(0); }
+  50% { transform: scale(1.012, 1.03) translateY(-2px); }
+}
+
+/* tiro: recua e "amassa" um instante */
+.hero-avatar.shoot .hero-bob { animation: heroShoot .22s ease-out; }
+@keyframes heroShoot {
+  0% { transform: translateX(calc(var(--dir, 1) * -7px)) scale(1.07, .92); }
+  55% { transform: translateX(calc(var(--dir, 1) * 3px)) scale(.97, 1.04); }
+  100% { transform: none; }
+}
+
+/* comemoração (combo, fase concluída, chefe derrotado): pulo com giro e brilho */
+.hero-avatar.cheer .hero-bob { animation: heroCheer .65s cubic-bezier(.3, 1.4, .5, 1); }
+.hero-avatar.cheer { filter: drop-shadow(0 0 22px #ffe06dcc); }
+@keyframes heroCheer {
+  0% { transform: scale(1.08, .9); }
+  30% { transform: translateY(-30px) scale(.96, 1.08) rotate(calc(var(--dir, 1) * -5deg)); }
+  60% { transform: translateY(-4px) scale(1.04, .96); }
+  100% { transform: none; }
+}
+
+/* dano (acertou um civil): treme e fica vermelho */
+.hero-avatar.hurt .hero-bob { animation: heroHurt .5s ease-out; }
+.hero-avatar.hurt { filter: drop-shadow(0 0 18px #ff2e5f); }
+.hero-avatar.hurt img { filter: sepia(1) hue-rotate(-50deg) saturate(5) brightness(1.1); }
+@keyframes heroHurt {
+  0%, 100% { transform: none; }
+  15% { transform: translateX(-9px) rotate(-3deg); }
+  35% { transform: translateX(8px) rotate(3deg); }
+  55% { transform: translateX(-5px); }
+  75% { transform: translateX(3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-bob, .hero-avatar.shoot .hero-bob, .hero-avatar.cheer .hero-bob, .hero-avatar.hurt .hero-bob { animation: none; }
+}
